@@ -1,0 +1,450 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a6f5aab..907d8bb 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -303,3 +303,23 @@ if(SMW_BUILD_COOP)
+                 ${CMAKE_SOURCE_DIR}/recomp/coop/smw_coop.ips
+                 $<TARGET_FILE_DIR:SuperMarioWorldCoopSNESRecomp>/smw_coop.ips)
+ endif()
++
++# Super Ryu World 1 (Lunar Magic/AddmusicK ROM hack). Local-only experimental
++# target: generated from the user's patched ROM by tools/regen_srw1.sh.
++option(SMW_BUILD_SRW1 "Build the Super Ryu World 1 executable" OFF)
++if(SMW_BUILD_SRW1)
++    file(GLOB SMW_SRW1_GEN_SOURCES CONFIGURE_DEPENDS
++        ${CMAKE_SOURCE_DIR}/src/gen-srw1/*.c)
++    if(NOT SMW_SRW1_GEN_SOURCES)
++        message(FATAL_ERROR "src/gen-srw1/ is empty - run tools/regen_srw1.sh")
++    endif()
++    smw_add_recomp_target(SuperRyuWorld1SNESRecomp "${SMW_SRW1_GEN_SOURCES}")
++    target_sources(SuperRyuWorld1SNESRecomp PRIVATE src/srw1_hle.c src/srw1_options.c src/srw1_interp.c)
++    target_include_directories(SuperRyuWorld1SNESRecomp BEFORE PRIVATE
++        ${CMAKE_SOURCE_DIR}/recomp/srw1)
++    target_compile_definitions(SuperRyuWorld1SNESRecomp PRIVATE
++        SMW_SRW1_BUILD=1
++        SNESRECOMP_LLE_BOUNCE_DEFAULT=0
++        SNES_GAME_VERSION="srw1-recomp-1"
++    )
++endif()
+diff --git a/src/main.c b/src/main.c
+index 4ebfe5f..39297eb 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -61,7 +61,11 @@
+ #include "launcher/launcher_capi.h"
+ #endif
+ #endif
+-#include "keybinds.h"
++#include "keybinds.h"
++#ifdef SMW_SRW1_BUILD
++#include "srw1_options.h"
++#include "srw1_interp.h"
++#endif
+ #include "host_report.h"
+ #include "audio_trace.h"
+ 
+@@ -576,11 +580,87 @@ static void DrawPpuFrameWithPerf(void) {
+   const uint32 dump_frame = snes_frame_counter ? snes_frame_counter - 1 : 0;
+   FrameDump_Present(dump_frame, pixel_buffer, pitch, g_snes_width, g_snes_height);
+   FrameDump_Ppu(dump_frame, g_ppu);
++#ifdef SMW_SRW1_BUILD
++  Srw1Options_OnPresent(pixel_buffer, pitch, g_snes_width * render_scale,
++                        g_snes_height * render_scale);
++#endif
+   g_renderer_funcs.EndDraw();
+   BenchmarkPhaseEnd(kSnesRecompBenchmarkPhase_HostPresent, host_phase);
+ }
+ 
+-static SDL_mutex *g_audio_mutex;
++#ifdef SMW_SRW1_BUILD
++/* 120 Hz+ presentation: logic still ticks once per 60 Hz frame; in-between
++ * frames are re-rasterized from captured PPU state (srw1_interp.c). */
++static uint8 g_srw1_live_pixels[256 * 4 * 224];
++static uint8 g_srw1_sub_pixels[256 * 4 * 224];
++
++static int Srw1DisplaySubframes(void) {
++  const char *env = getenv("SRW1_INTERP_SUBFRAMES");
++  if (env) return IntMax(1, IntMin(atoi(env), 8));
++  float hz = 0;
++#if SNESRECOMP_SDL3
++  const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(g_window));
++  if (dm) hz = dm->refresh_rate;
++#else
++  SDL_DisplayMode dm;
++  if (SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(g_window), &dm) == 0)
++    hz = (float)dm.refresh_rate;
++#endif
++  int n = (int)(hz / 60.0f + 0.5f);
++  return IntMax(1, IntMin(n, 8));
++}
++
++bool Srw1InterpUsable(void) {
++  return Srw1Interp_GetMode() != kSrw1Motion_Off && g_snes_width == 256 &&
++         g_snes_height == 224 && !g_smw_video.enabled &&
++         !g_display_perf && Srw1DisplaySubframes() >= 2;
++}
++
++static void Srw1PresentPixels(const uint8 *src) {
++  uint8 *pb = 0;
++  int pitch = 0;
++  g_renderer_funcs.BeginDraw(g_snes_width, g_snes_height, &pb, &pitch);
++  for (int y = 0; y < 224; y++)
++    memcpy(pb + (size_t)y * pitch, src + y * 1024, 1024);
++  Srw1Options_OnPresent(pb, pitch, g_snes_width, g_snes_height);
++  g_renderer_funcs.EndDraw();
++}
++
++static void Srw1WaitUntil(uint64 target) {
++  uint64 freq = SDL_GetPerformanceFrequency();
++  for (;;) {
++    uint64 now = SDL_GetPerformanceCounter();
++    if (now >= target) return;
++    uint64 ms = (target - now) * 1000 / freq;
++    if (ms > 1) SDL_Delay((uint32)(ms - 1));
++  }
++}
++
++static void Srw1DrawInterpolated(void) {
++  uint64 t0 = SDL_GetPerformanceCounter();
++  double period = (double)SDL_GetPerformanceFrequency() / 60.0;
++  /* The live raster also runs HDMA + the raster IRQ: exactly once per tick. */
++  RtlDrawPpuFrame(g_srw1_live_pixels, 1024, g_ppu_render_flags);
++  const uint32 dump_frame = snes_frame_counter ? snes_frame_counter - 1 : 0;
++  FrameDump_Present(dump_frame, g_srw1_live_pixels, 1024, 256, 224);
++  FrameDump_Ppu(dump_frame, g_ppu);
++  int n = Srw1DisplaySubframes();
++  bool extrapolate = Srw1Interp_GetMode() == kSrw1Motion_Extrapolate;
++  for (int k = 0; k < n; k++) {
++    if (k > 0) Srw1WaitUntil(t0 + (uint64)(period * k / n));
++    /* Interpolate: k/n of the way from the previous tick, ending exactly on
++     * the newest tick (<= 1 tick of delay). Low-latency: newest tick first,
++     * then projected forward. */
++    float f = extrapolate ? (float)k / n : (float)(k + 1) / n - 1.0f;
++    if (f != 0.0f && Srw1Interp_RenderSubframe(f, g_srw1_sub_pixels))
++      Srw1PresentPixels(g_srw1_sub_pixels);
++    else
++      Srw1PresentPixels(g_srw1_live_pixels);
++  }
++}
++#endif
++
++static SDL_mutex *g_audio_mutex;
+ static uint8 *g_audiobuffer, *g_audiobuffer_cur, *g_audiobuffer_end;
+ static int g_frames_per_block;
+ static uint8 g_audio_channels;
+@@ -1209,6 +1289,10 @@ int main(int argc, char** argv) {
+     g_config.disable_frame_delay = !g_benchmark_audio_paced;
+     g_config.skip_launcher = true;
+     g_config.fullscreen = 0;
++#ifdef SMW_SRW1_BUILD
++    /* Shader tests run benchmarks through the OpenGL output. */
++    if (!getenv("SRW1_GL_SHOT"))
++#endif
+     g_config.output_method = kOutputMethod_SDL;
+   }
+ #ifdef SMW_COOP_BUILD
+@@ -1236,7 +1320,13 @@ int main(int argc, char** argv) {
+    * skips a 512-byte SMC copier header automatically before hashing,
+    * so headered and unheadered dumps both verify against this value. */
+   static char rom_path_buf[1024];
++#ifdef SMW_SRW1_BUILD
++  /* Super Ryu World 1 (BPS target CRC, unheadered 2 MB). The patched ROM is
++   * loaded directly; no stock image or runtime patching is involved. */
++  static const uint32_t kSmwUsaCrc32 = 0xD6A6317Eu;
++#else
+   static const uint32_t kSmwUsaCrc32 = 0xB19ED489u;
++#endif
+   int rom_resolved_by_launcher = 0;
+ 
+ #ifdef SMW_COOP_BUILD
+@@ -1296,7 +1386,7 @@ int main(int argc, char** argv) {
+    * legal — so the Mods page renders empty with no error anywhere. That is
+    * what shipped in v0.14.0. */
+   int mods_ready = 0;
+-#if SNESRECOMP_ENABLE_MODS
++#if SNESRECOMP_ENABLE_MODS && !defined(SMW_SRW1_BUILD)
+   mods_ready = snes_mod_runtime_initialize_c(
+       SNES_MOD_CATALOG_ROOT, "super-mario-world-us",
+       "0838e531fe22c077528febe14cb3ff7c492f1f5fa8de354192bdff7137c27f5b");
+@@ -1406,6 +1496,8 @@ int main(int argc, char** argv) {
+ #endif
+ #ifdef SMW_COOP_BUILD
+       gi.name = "Super Mario World Co-op";
++#elif defined(SMW_SRW1_BUILD)
++      gi.name = "Super Ryu World 1";
+ #else
+       gi.name = "Super Mario World";
+ #endif
+@@ -1419,9 +1511,13 @@ int main(int argc, char** argv) {
+       gi.adaptive_view_supported = 0;
+ #if SNESRECOMP_ENABLE_MODS
+       gi.mods = mods_ready ? snes_mod_runtime_launcher_provider_c() : NULL;
+-#endif
++#endif
+       SnesLauncherVideo_Configure(&ls, &gi, 1, 1,
+           g_config.display_aspect, g_config.shader);
++#ifdef SMW_SRW1_BUILD
++      /* Shader presets are chosen only from the in-game options menu (F12). */
++      gi.has_shader = 0;
++#endif
+ #else
+ #ifdef SMW_COOP_BUILD
+       gi.widescreen_supported = 0;
+@@ -1692,7 +1788,7 @@ int main(int argc, char** argv) {
+   }
+   const char *spawn = getenv("SMW_ENEMY_SPAWN");
+   if (spawn && *spawn) g_smw_video.adaptive_spawns = strcmp(spawn, "original") != 0;
+-#ifdef SMW_COOP_BUILD
++#if defined(SMW_COOP_BUILD) || defined(SMW_SRW1_BUILD)
+   g_smw_video.enabled = false;
+ #endif
+   g_ws_active = false;
+@@ -1701,7 +1797,10 @@ int main(int argc, char** argv) {
+       SnesDisplayAspect_Clamp(g_config.display_aspect));
+   g_snes_width = g_smw_viewport.width;
+   extern void SmwRendererInstallHooks(void);
++#ifndef SMW_SRW1_BUILD
++  /* Stock-address widescreen guest hooks; SRW1 relocates/patches these. */
+   SmwRendererInstallHooks();
++#endif
+   if (!SmwCoopInstallHooks()) {
+     fprintf(stderr, "Unable to install native co-op guest hooks.\n");
+     return 1;
+@@ -2098,6 +2197,11 @@ error_reading:;
+       case SDL_CONTROLLERBUTTONDOWN:
+       case SDL_CONTROLLERBUTTONUP: {
+         gi = GetGamepadInfo(SNESRECOMP_SDL_EVENT_BUTTON_DEVICE(event));
++#ifdef SMW_SRW1_BUILD
++        if (Srw1Options_HandleButton(SNESRECOMP_SDL_EVENT_BUTTON(event),
++                                     event.type == SDL_CONTROLLERBUTTONDOWN))
++          break;
++#endif
+         if (gi) {
+           int b = RemapSdlButton(SNESRECOMP_SDL_EVENT_BUTTON(event));
+           if (b >= 0)
+@@ -2127,11 +2231,20 @@ error_reading:;
+           running = false;
+           break;
+         }
++#endif
++#ifdef SMW_SRW1_BUILD
++        if (Srw1Options_HandleKey(SNESRECOMP_SDL_EVENT_KEY(event), true,
++                                  SNESRECOMP_SDL_EVENT_REPEAT(event) != 0))
++          break;
+ #endif
+         HandleInput(SNESRECOMP_SDL_EVENT_KEY(event),
+                     SNESRECOMP_SDL_EVENT_MOD(event), true);
+-        break;
+-      case SDL_KEYUP:
++        break;
++      case SDL_KEYUP:
++#ifdef SMW_SRW1_BUILD
++        if (Srw1Options_HandleKey(SNESRECOMP_SDL_EVENT_KEY(event), false, false))
++          break;
++#endif
+         HandleInput(SNESRECOMP_SDL_EVENT_KEY(event),
+                     SNESRECOMP_SDL_EVENT_MOD(event), false);
+         break;
+@@ -2159,11 +2272,25 @@ error_reading:;
+       SDL_Delay(16);
+       continue;
+     }
++#endif
++#ifdef SMW_SRW1_BUILD
++    Srw1Options_Tick();
++    if (Srw1Options_IsOpen()) {
++      /* Options menu open: the game is paused; keep presenting the last
++       * frame with the menu (and the live shader preset) over it. */
++      uint8 *menu_px = 0;
++      int menu_pitch = 0;
++      g_renderer_funcs.BeginDraw(g_snes_width, g_snes_height, &menu_px, &menu_pitch);
++      Srw1Options_RedrawPaused(menu_px, menu_pitch, g_snes_width, g_snes_height);
++      g_renderer_funcs.EndDraw();
++      SDL_Delay(16);
++      continue;
++    }
+ #endif
+     if (g_paused) {
+-      SDL_Delay(16);
+-      continue;
+-    }
++      SDL_Delay(16);
++      continue;
++    }
+ 
+     // Clear gamepad inputs when joypad directional inputs to avoid wonkiness
+     if (g_input_state & 0xf0)
+@@ -2323,6 +2450,11 @@ error_reading:;
+     g_snes->disableRender = g_turbo && (frameCtr & 0xf) != 0;
+ 
+     if (!g_snes->disableRender) {
++#ifdef SMW_SRW1_BUILD
++      if (Srw1InterpUsable())
++        Srw1DrawInterpolated();
++      else
++#endif
+       DrawPpuFrameWithPerf();
+     } else {
+       /* Turbo (render skipped): SmwDrawPpuFrame / draw_ppu_frame is NOT purely
+diff --git a/src/opengl.c b/src/opengl.c
+index 68135ae..37713f0 100644
+--- a/src/opengl.c
++++ b/src/opengl.c
+@@ -16,7 +16,57 @@ static size_t g_screen_buffer_size;
+ static int g_draw_width, g_draw_height;
+ static unsigned int g_program, g_VAO;
+ static GlTextureWithSize g_texture;
+-static GlslShader *g_glsl_shader;
++static GlslShader *g_glsl_shader;
++
++#ifdef SMW_SRW1_BUILD
++#include "srw1_options.h"
++#include <stdlib.h>
++static bool g_gl_ready;
++static unsigned g_gl_present_count;
++
++/* Runtime preset switch from the in-game options menu. NULL/"" = off. The
++ * old chain is kept if the new preset fails to compile. */
++bool OpenGLRenderer_SetShader(const char *path) {
++  if (!g_gl_ready) return false;
++  GlslShader *ns = NULL;
++  if (path && path[0]) {
++    ns = GlslShader_CreateFromFile(path);
++    if (!ns) return false;
++  }
++  if (g_glsl_shader) GlslShader_Destroy(g_glsl_shader);
++  g_glsl_shader = ns;
++  return true;
++}
++
++bool OpenGLRenderer_IsActive(void) { return g_gl_ready; }
++
++/* Test hook: SRW1_GL_SHOT=<file.ppm> SRW1_GL_SHOT_FRAME=<n> writes the final
++ * (post-shader) back buffer of the n-th presented frame. */
++static void Srw1MaybeGlShot(int w, int h) {
++  const char *path = getenv("SRW1_GL_SHOT");
++  const char *fr = getenv("SRW1_GL_SHOT_FRAME");
++  const char *cnt = getenv("SRW1_GL_SHOT_COUNT");
++  if (!path || !fr) return;
++  unsigned first = (unsigned)atoi(fr), n = cnt ? (unsigned)atoi(cnt) : 1;
++  if (g_gl_present_count < first || g_gl_present_count >= first + n) return;
++  char numbered[1024];
++  if (cnt) {
++    snprintf(numbered, sizeof(numbered), "%s.%05u.ppm", path, g_gl_present_count);
++    path = numbered;
++  }
++  unsigned char *px = (unsigned char *)malloc((size_t)w * h * 3);
++  if (!px) return;
++  glPixelStorei(GL_PACK_ALIGNMENT, 1);
++  glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, px);
++  FILE *f = fopen(path, "wb");
++  if (f) {
++    fprintf(f, "P6\n%d %d\n255\n", w, h);
++    for (int y = h - 1; y >= 0; y--) fwrite(px + (size_t)y * w * 3, 1, (size_t)w * 3, f);
++    fclose(f);
++  }
++  free(px);
++}
++#endif
+ 
+ static void GL_APIENTRY MessageCallback(GLenum source,
+                 GLenum type,
+@@ -136,8 +186,21 @@ static bool OpenGLRenderer_Init(SDL_Window *window) {
+     printf("%s\n", infolog);
+   }
+ 
+-  if (g_config.shader)
+-    g_glsl_shader = GlslShader_CreateFromFile(g_config.shader);
++#ifdef SMW_SRW1_BUILD
++  /* Presets are picked only from the in-game options menu (srw1_options). */
++  g_gl_ready = true;
++  {
++    const char *preset = Srw1Options_StartupShader();
++    if (preset) {
++      g_glsl_shader = GlslShader_CreateFromFile(preset);
++      if (!g_glsl_shader)
++        fprintf(stderr, "[srw1] startup shader preset failed: %s\n", preset);
++    }
++  }
++#else
++  if (g_config.shader)
++    g_glsl_shader = GlslShader_CreateFromFile(g_config.shader);
++#endif
+   
+   return true;
+ }
+@@ -200,8 +263,12 @@ static void OpenGLRenderer_EndDraw(void) {
+     glBindVertexArray(g_VAO);
+     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+   } else {
+-    GlslShader_Render(g_glsl_shader, &g_texture, viewport_x, viewport_y, viewport_width, viewport_height);
+-  }
++    GlslShader_Render(g_glsl_shader, &g_texture, viewport_x, viewport_y, viewport_width, viewport_height);
++  }
++#ifdef SMW_SRW1_BUILD
++  g_gl_present_count++;
++  Srw1MaybeGlShot(drawable_width, drawable_height);
++#endif
+ 
+   SDL_GL_SwapWindow(g_window);
+ }
+diff --git a/src/smw_rtl.c b/src/smw_rtl.c
+index 5ccf766..86b0e6e 100644
+--- a/src/smw_rtl.c
++++ b/src/smw_rtl.c
+@@ -12,6 +12,9 @@
+ #include "snes/interp_bridge.h"   /* faithful LLE of the $806B main loop */
+ #include "mods/falcon/smw_falcon_presentation_runtime.h"
+ #include "mods/coop/coop_presentation.h"
++#ifdef SMW_SRW1_BUILD
++#include "srw1_interp.h"
++#endif
+ 
+ static SnesrecompExecutionMode smw_execution_mode(void) {
+   /* LLE is the correctness floor. The hand-written frame driver remains an
+@@ -43,6 +46,9 @@ void SmwDrawPpuFrame(void) {
+   SmwRendererBeginHardwareRaster(g_ppu);
+   for (int i = 0; i <= 224; i++) {
+     SmwRendererCaptureLine(g_ppu, i);
++#ifdef SMW_SRW1_BUILD
++    Srw1Interp_CaptureLine(g_ppu, i); /* read-only snapshot for 120 Hz+ */
++#endif
+     ppu_runLine(g_ppu, i);
+     SimpleHdma_DoLine(&hdma_chans[0]);
+     SimpleHdma_DoLine(&hdma_chans[1]);
+@@ -66,6 +72,9 @@ void SmwDrawPpuFrame(void) {
+     }
+   }
+   SmwRendererEndHardwareRaster();
++#ifdef SMW_SRW1_BUILD
++  Srw1Interp_EndFrame();
++#endif
+ }
+ 
+ #include "mods/coop/coop_simulation.h"
+@@ -85,7 +94,14 @@ void RunOneFrameOfGame(void) {
+   if (!g_did_reset) {
+     cpu_state_init(&g_cpu, g_ram);
+     cpu_trace_px_breadcrumb(&g_cpu, 0x1000, "after_cpu_state_init");
++#ifdef SMW_SRW1_BUILD
++    /* SRW1's reset vector is a Lunar Magic FastROM stub ($00:BA52 -> JML
++     * $90:8008 -> $80:8000). Run the whole reset path in the byte-exact
++     * interpreter until it reaches the $00:806B main-loop spin. */
++    interp_bridge_run_scheduler(&g_cpu, 0x00BA52, 0x00806B, 0x0010);
++#else
+     I_RESET(&g_cpu);
++#endif
+     cpu_trace_px_breadcrumb(&g_cpu, 0x1001, "after_I_RESET");
+     g_did_reset = true;
+   }
+@@ -129,8 +145,8 @@ void RunOneFrameOfGame(void) {
+      * cause of SMW's per-frame stack drift into DMA-reg space. Matches
+      * mmx_rtl.c; see cpu_push_interrupt_frame in cpu_state.h. */
+     cpu_push_interrupt_frame(&g_cpu);
+-#ifdef SMW_COOP_BUILD
+-    /* The co-op hack rewrites interrupt-adjacent control flow and expands the
++#if defined(SMW_COOP_BUILD) || defined(SMW_SRW1_BUILD)
++    /* The co-op hack (and Super Ryu World 1's Lunar Magic/AMK hijacks) rewrites interrupt-adjacent control flow and expands the
+      * ROM to banks not present in stock SMW. Keep NMI in the byte-exact tier;
+      * it is a bounded RTI-terminated handler and still shares all recomp bus,
+      * PPU, DMA, and input state. */

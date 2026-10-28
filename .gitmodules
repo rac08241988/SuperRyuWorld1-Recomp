@@ -1,0 +1,3 @@
+[submodule "SuperMarioWorldRecomp"]
+	path = SuperMarioWorldRecomp
+	url = https://github.com/mstan/SuperMarioWorldRecomp.git

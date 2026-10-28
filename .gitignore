@@ -1,0 +1,31 @@
+# ROMs and patches - never commit (bring your own)
+*.sfc
+*.smc
+*.swc
+*.fig
+*.bps
+*.ips
+*.ups
+*.srm
+# Generated / ROM-derived sources
+src/gen/
+src/gen-*/
+gen/
+gen-srw1/
+recomp/srw1/funcs.h
+.build/
+# Build outputs
+build*/
+*.exe
+*.dll
+*.o
+*.obj
+# Fetched third-party content
+third_party/
+shaders/
+# Runtime files
+srw1_options.ini
+saves/
+*.ppm
+*.bmp
+__pycache__/

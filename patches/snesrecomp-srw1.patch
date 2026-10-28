@@ -1,0 +1,172 @@
+diff --git a/runner/src/desktop/glsl_shader.c b/runner/src/desktop/glsl_shader.c
+index 54f2464..8a5df82 100644
+--- a/runner/src/desktop/glsl_shader.c
++++ b/runner/src/desktop/glsl_shader.c
+@@ -179,13 +179,19 @@ static bool GlslShader_ReadPresetFile(GlslShader *gs, const char *filename) {
+     else if ((pass = ParseConfigKeyPass(gs, line, "srgb_framebuffer")) != NULL)
+       pass->srgb_framebuffer = ParseBool(value, NULL);
+     else if ((pass = ParseConfigKeyPass(gs, line, "alias")) != NULL)
+-      ;
++      StrSet(&pass->alias, value);
+     else if (strcmp(line, "textures") == 0 && gs->first_texture == NULL)
+       ParseTextures(gs, value);
+     else if (strcmp(line, "parameters") == 0)
+       ParseParameters(gs, value);
+-    else if (!ParseTextureKeyValue(gs, line, value) && !ParseParameterKeyValue(gs, line, value))
+-      fprintf(stderr, "%s:%d: Unknown key '%s'\n", filename, lineno, line);
++    else if (!ParseTextureKeyValue(gs, line, value) && !ParseParameterKeyValue(gs, line, value)) {
++      /* RetroArch presets override #pragma parameter defaults with bare
++       * `NAME = value` lines and need not list them under `parameters`.
++       * Record the override; the pragma keeps it (has_value). */
++      GlslParam *pa = GlslShader_GetParam(gs, line);
++      pa->value = (float)atof(value);
++      pa->has_value = true;
++    }
+   }
+   free(data_org);
+   return gs->n_pass != 0;
+@@ -222,30 +228,56 @@ void GlslShader_ReadShaderFile(GlslShader *gs, const char *filename, ByteArray *
+   free(data_org);
+ }
+ 
+-static bool GlslPass_Compile(GlslPass *p, uint type, const uint8 *data, size_t size) {
++static bool GlslPass_Compile(GlslPass *p, uint type, const uint8 *data_in, size_t size) {
+   static const char kVertexPrefix[] =   "#define VERTEX\n#define PARAMETER_UNIFORM\n";
+   static const char kFragmentPrefix[] = "#define FRAGMENT\n#define PARAMETER_UNIFORM\n";
++  /* Some libretro shaders write gl_FragColor in one branch while declaring
++     `out vec4 FragColor` for GLSL >= 130; core-profile compilers reject the mix. */
++  static const char kFragmentCompat[] = "#define FRAGMENT\n#define PARAMETER_UNIFORM\n#if __VERSION__ >= 130\n#define gl_FragColor FragColor\n#endif\n";
+   const GLchar *strings[3];
+   GLint lengths[3];
+   char buffer[256];
++  char version_line[64];
+   GLint compile_status = 0;
+-  size_t skip = 0;
+-
+-  if (size < 8 || memcmp(data, "#version", 8) != 0) {
+-    strings[0] = "#version 330\n";
+-    lengths[0] = sizeof("#version 330\n") - 1;
++  uint8 *data = (uint8 *)malloc(size + 1);
++  if (!data) return false;
++  memcpy(data, data_in, size);
++  data[size] = 0;
++
++  /* #version must be first; many presets put a license comment above it.
++     Hoist the first line-leading #version and blank it in place. */
++  snprintf(version_line, sizeof(version_line), "#version 330\n");
++  for (size_t i = 0; i + 8 <= size; i++) {
++    if ((i == 0 || data[i - 1] == '\n') && memcmp(data + i, "#version", 8) == 0) {
++      size_t e = i;
++      while (e < size && data[e] != '\n') e++;
++      size_t n = e - i;
++      if (n < sizeof(version_line) - 1) {
++        memcpy(version_line, data + i, n);
++        version_line[n] = '\n';
++        version_line[n + 1] = 0;
++        memset(data + i, ' ', n);
++      }
++      break;
++    }
++  }
++  bool uses_fragcolor_mix = type != GL_VERTEX_SHADER &&
++      strstr((char *)data, "gl_FragColor") && strstr((char *)data, "out vec4 FragColor");
++  strings[0] = version_line;
++  lengths[0] = (int)strlen(version_line);
++  if (type == GL_VERTEX_SHADER) {
++    strings[1] = kVertexPrefix; lengths[1] = sizeof(kVertexPrefix) - 1;
++  } else if (uses_fragcolor_mix) {
++    strings[1] = kFragmentCompat; lengths[1] = sizeof(kFragmentCompat) - 1;
+   } else {
+-    while (skip < size && data[skip++] != '\n') {}
+-    strings[0] = (char*)data;
+-    lengths[0] = (int)skip;
++    strings[1] = kFragmentPrefix; lengths[1] = sizeof(kFragmentPrefix) - 1;
+   }
+-  strings[1] = (type == GL_VERTEX_SHADER) ? (char*)kVertexPrefix : kFragmentPrefix;
+-  lengths[1] = (type == GL_VERTEX_SHADER) ? sizeof(kVertexPrefix) - 1 : sizeof(kFragmentPrefix) - 1;
+-  strings[2] = (GLchar *)data + skip;
+-  lengths[2] = (int)(size - skip);
++  strings[2] = (GLchar *)data;
++  lengths[2] = (int)size;
+   uint shader = glCreateShader(type);
+   glShaderSource(shader, 3, strings, lengths);
+   glCompileShader(shader);
++  free(data);
+   glGetShaderiv(shader, GL_COMPILE_STATUS, &compile_status);
+   buffer[0] = 0;
+   glGetShaderInfoLog(shader, sizeof(buffer), NULL, buffer);
+@@ -305,7 +337,15 @@ static void GlslShader_GetUniforms(GlslShader *gs) {
+     }
+     for (int j = 0; j < gs->n_pass; j++) {
+       GlslTextureUniform_Read(program, "Pass", j, &p->unif.Pass[j]);
++    }
++    /* PassPrevN may reach back to the original input (N == pass index). */
++    for (int j = 0; j <= gs->n_pass && j < kGlslMaxPasses; j++)
+       GlslTextureUniform_Read(program, "PassPrev", j, &p->unif.PassPrev[j]);
++    for (int j = 1; j <= gs->n_pass; j++) {
++      p->unif.Alias[j].Texture = p->unif.Alias[j].InputSize = -1;
++      p->unif.Alias[j].TextureSize = p->unif.Alias[j].TexCoord = -1;
++      if (gs->pass[j].alias && gs->pass[j].alias[0])
++        GlslTextureUniform_Read(program, gs->pass[j].alias, -1, &p->unif.Alias[j]);
+     }
+     GlslTexture *t = gs->first_texture;
+     for (int j = 0; t != NULL; t = t->next, j++)
+@@ -456,6 +496,7 @@ void GlslShader_Destroy(GlslShader *gs) {
+     glDeleteTextures(1, &p->gl_texture);
+     glDeleteFramebuffers(1, &p->gl_fbo);
+     free(p->filename);
++    free(p->alias);
+   }
+   free(gs->pass);
+   GlslTexture *t;
+@@ -479,7 +520,7 @@ void GlslShader_Destroy(GlslShader *gs) {
+ }
+ 
+ enum {
+-  kMaxVaosInRenderCtx = 11 + kGlslMaxPasses * 2
++  kMaxVaosInRenderCtx = 11 + kGlslMaxPasses * 3
+ };
+ 
+ typedef struct RenderCtx {
+@@ -548,8 +589,13 @@ static void GlslShader_SetShaderVars(GlslShader *gs, RenderCtx *ctx, int pass) {
+   for (int i = 1; i < pass; i++)
+     RenderCtx_SetGlslTextureUniform(ctx, &p->unif.Pass[i], gs->pass[i].width, gs->pass[i].height, gs->pass[i].gl_texture);
+   // PassPrevX uniforms
++  for (int i = 0; i < pass; i++)
++    if (pass - i < kGlslMaxPasses)
++      RenderCtx_SetGlslTextureUniform(ctx, &p->unif.PassPrev[pass - i], gs->pass[i].width, gs->pass[i].height, gs->pass[i].gl_texture);
++  // alias uniforms: an earlier pass named by its preset `aliasN`
+   for (int i = 1; i < pass; i++)
+-    RenderCtx_SetGlslTextureUniform(ctx, &p->unif.PassPrev[pass - i], gs->pass[i].width, gs->pass[i].height, gs->pass[i].gl_texture);
++    if (gs->pass[i].alias)
++      RenderCtx_SetGlslTextureUniform(ctx, &p->unif.Alias[i], gs->pass[i].width, gs->pass[i].height, gs->pass[i].gl_texture);
+   // #parameter uniforms
+   for (GlslParam *pa = gs->first_param; pa != NULL; pa = pa->next)
+     if (pa->uniform[pass] >= 0)
+diff --git a/runner/src/desktop/glsl_shader.h b/runner/src/desktop/glsl_shader.h
+index f4adb2f..efbafdf 100644
+--- a/runner/src/desktop/glsl_shader.h
++++ b/runner/src/desktop/glsl_shader.h
+@@ -36,11 +36,13 @@ typedef struct GlslUniforms {
+   GlslTextureUniform Prev[7];
+   GlslTextureUniform Pass[kGlslMaxPasses];
+   GlslTextureUniform PassPrev[kGlslMaxPasses];
++  GlslTextureUniform Alias[kGlslMaxPasses + 1];
+   int Texture[kGlslMaxTextures];
+ } GlslUniforms;
+ 
+ typedef struct GlslPass {
+   char *filename;
++  char *alias;
+   uint8 scale_type_x, scale_type_y;
+   bool float_framebuffer;
+   bool srgb_framebuffer;
+@@ -80,7 +82,7 @@ typedef struct GlslParam {
+   float value;
+   float min;
+   float max;
+-  uint uniform[kGlslMaxPasses];
++  uint uniform[kGlslMaxPasses + 1];
+ } GlslParam;
+ 
+ typedef struct GlslShader {
