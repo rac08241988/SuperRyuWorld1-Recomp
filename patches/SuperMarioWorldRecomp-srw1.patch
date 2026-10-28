@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index a6f5aab..907d8bb 100644
+index a6f5aab..a11f2fa 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -303,3 +303,23 @@ if(SMW_BUILD_COOP)
+@@ -303,3 +303,29 @@ if(SMW_BUILD_COOP)
                  ${CMAKE_SOURCE_DIR}/recomp/coop/smw_coop.ips
                  $<TARGET_FILE_DIR:SuperMarioWorldCoopSNESRecomp>/smw_coop.ips)
  endif()
@@ -20,9 +20,15 @@ index a6f5aab..907d8bb 100644
 +    target_sources(SuperRyuWorld1SNESRecomp PRIVATE src/srw1_hle.c src/srw1_options.c src/srw1_interp.c)
 +    target_include_directories(SuperRyuWorld1SNESRecomp BEFORE PRIVATE
 +        ${CMAKE_SOURCE_DIR}/recomp/srw1)
++    # Native AOT on by default for SRW1: replace the stock interpreted-floor
++    # default set by smw_add_recomp_target (interpreter only for force_lle /
++    # uncompiled targets; SNESRECOMP_LLE_BOUNCE=0 forces the all-interpreter path).
++    get_target_property(_srw1_defs SuperRyuWorld1SNESRecomp COMPILE_DEFINITIONS)
++    list(REMOVE_ITEM _srw1_defs SNESRECOMP_LLE_BOUNCE_DEFAULT=0)
++    list(APPEND _srw1_defs SNESRECOMP_LLE_BOUNCE_DEFAULT=1)
++    set_property(TARGET SuperRyuWorld1SNESRecomp PROPERTY COMPILE_DEFINITIONS "${_srw1_defs}")
 +    target_compile_definitions(SuperRyuWorld1SNESRecomp PRIVATE
 +        SMW_SRW1_BUILD=1
-+        SNESRECOMP_LLE_BOUNCE_DEFAULT=0
 +        SNES_GAME_VERSION="srw1-recomp-1"
 +    )
 +endif()

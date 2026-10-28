@@ -49,6 +49,7 @@ cp "$ROOT"/overlay/src/* "$UP/src/"
 cp "$ROOT"/overlay/tools/regen_srw1.sh "$UP/tools/"
 chmod +x "$UP/tools/regen_srw1.sh"
 mkdir -p "$UP/recomp/srw1"
+cp "$ROOT"/overlay/recomp/srw1/* "$UP/recomp/srw1/"
 
 if [ "$SHADERS" = 1 ]; then
   echo "=== Fetching libretro GLSL shaders ==="

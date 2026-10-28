@@ -170,3 +170,115 @@ index f4adb2f..efbafdf 100644
  } GlslParam;
  
  typedef struct GlslShader {
+diff --git a/runner/src/framedump.c b/runner/src/framedump.c
+index d3809d7..05f5de0 100644
+--- a/runner/src/framedump.c
++++ b/runner/src/framedump.c
+@@ -48,7 +48,21 @@ void FrameDump_Present(uint32_t frame, const uint8_t *bgra, uint32_t pitch,
+   fclose(f);
+ }
+ 
++#include "state_dump.h"
+ void FrameDump_Ppu(uint32_t frame, const Ppu *ppu) {
++  /* Opt-in full state dump (WRAM/ARAM/DSP/...) at listed frames, e.g.
++   * SNESRECOMP_STATE_DUMP_FRAMES=120,300,600 -> <framedump>/f120.*.bin */
++  if (g_framedump_dir[0]) {
++    const char *sl = getenv("SNESRECOMP_STATE_DUMP_FRAMES");
++    if (sl && *sl) {
++      char buf[256]; snprintf(buf, sizeof(buf), ",%s,", sl);
++      char key[24]; snprintf(key, sizeof(key), ",%u,", frame);
++      if (strstr(buf, key)) {
++        char tag[24]; snprintf(tag, sizeof(tag), "f%u", frame);
++        snes_state_dump(g_framedump_dir, tag, NULL, 0, 0, 0, frame);
++      }
++    }
++  }
+   if (!g_framedump_pixels || !ppu || frame < g_framedump_start ||
+       frame > g_framedump_end) return;
+   char path[768];
+diff --git a/runner/src/snes/interp_bridge.c b/runner/src/snes/interp_bridge.c
+index 98fb3b6..6a91441 100644
+--- a/runner/src/snes/interp_bridge.c
++++ b/runner/src/snes/interp_bridge.c
+@@ -55,6 +55,28 @@ static const double kInterpApuPerMaster = (32040.0 * 32.0) / (1364.0 * 262.0 * 6
+  * AOT bounce. Game-thread only (like the interp itself); nesting shares the
+  * accumulator safely because flushing early is always correct. */
+ static uint64_t s_apu_pending_master = 0;
++
++/* SNESRECOMP_NATIVE_STATS=1: at exit, report how much guest CPU time ran on
++ * the interpreter tier (executed opcodes vs. idle-loop replay/skip) versus the
++ * rest (compiled AOT bodies + DMA/other charges). Diagnostic only. */
++static uint64_t g_ns_interp_exec_master = 0, g_ns_interp_idle_master = 0;
++static const CpuState *g_ns_cpu = NULL;
++static uint64_t g_ns_exit_total = 0;
++static void ns_report(void) {
++    const CpuState *c = g_ns_cpu;
++    uint64_t tot = g_ns_exit_total ? g_ns_exit_total : (c ? c->master_cycles : 0);
++    if (!tot) return;
++    uint64_t other = tot - g_ns_interp_exec_master - g_ns_interp_idle_master;
++    uint64_t busy = tot - g_ns_interp_idle_master;
++    fprintf(stderr, "[native-stats] guest master cycles: total=%llu interp_exec=%llu interp_idle=%llu native+other=%llu | native share of non-idle CPU time = %.2f%%\n",
++            (unsigned long long)tot, (unsigned long long)g_ns_interp_exec_master,
++            (unsigned long long)g_ns_interp_idle_master, (unsigned long long)other,
++            busy ? 100.0 * (double)other / (double)busy : 0.0);
++}
++__attribute__((constructor)) static void ns_init(void) {
++    const char *e = getenv("SNESRECOMP_NATIVE_STATS");
++    if (e && e[0] && e[0] != '0') atexit(ns_report);
++}
+ /* Master-cycle threshold below which the pre-AOT-bounce flush is skipped (see
+  * the bounce site). 4096 (~1 output sample of SPC time) matches the periodic
+  * batch-flush threshold. Env override SNESRECOMP_LLE_APU_FLUSH_THRESH is a
+@@ -2019,6 +2041,7 @@ static int _interp_run_core(CpuState *cpu, uint32_t entry_pc24,
+                              * (no-op re-anchor), catchup adds exactly
+                              * skip * kInterpApuPerMaster. */
+                             s_apu_pending_master += skip;
++                            g_ns_interp_idle_master += skip;
+                             for (int _g = 0; s_apu_pending_master && _g < 64;
+                                  _g++) {
+                                 const uint64_t _max_feed =
+@@ -2122,6 +2145,7 @@ static int _interp_run_core(CpuState *cpu, uint32_t entry_pc24,
+                                 g_interp_bridge_steps++;
+                                 cpu->cycles += idle_cost[e].cyc;
+                                 cpu->master_cycles += idle_cost[e].master;
++                                g_ns_interp_idle_master += idle_cost[e].master;
+                                 snes_refresh_charge();
+                                 cpu->open_bus = idle_cost[e].open_bus;
+                                 if (apu_pending) {
+@@ -2694,6 +2718,7 @@ static int _interp_run_core(CpuState *cpu, uint32_t entry_pc24,
+             g_interp_bridge_steps++;
+             cpu->cycles        += (uint64_t)_cyc;
+             cpu->master_cycles += _master;
++            g_ns_interp_exec_master += _master; g_ns_cpu = cpu;
+             /* DRAM refresh tax — shared watermark with the AOT tier's
+              * WatchdogCheck charge; see common_cpu_infra.c. */
+             snes_refresh_charge();
+diff --git a/runner/src/state_dump.c b/runner/src/state_dump.c
+index 7779dd0..ea5b0c0 100644
+--- a/runner/src/state_dump.c
++++ b/runner/src/state_dump.c
+@@ -12,6 +12,8 @@
+ #include "snes/dma.h"
+ #include "snes/ppu.h"
+ #include "snes/snes.h"
++#include "snes/apu.h"
++#include "snes/dsp.h"
+ #include "snes/superfx.h"
+ #include "audio_trace.h"
+ 
+@@ -180,6 +182,15 @@ int snes_state_dump(const char *dir, const char *tag, const uint8_t *pixels,
+   if (g_snes && g_snes->cart && g_snes->cart->ram && g_snes->cart->ramSize)
+     rc |= write_blob(dir, tag, ".sram.bin", g_snes->cart->ram,
+                      g_snes->cart->ramSize);
++  if (g_snes && g_snes->apu) {
++    /* ARAM + DSP registers: lets an LLE-bounce run be diffed against the
++     * interpreter for audio-driver state (SPC uploads, song start). */
++    RtlApuLock();
++    rc |= write_blob(dir, tag, ".aram.bin", g_snes->apu->ram, 0x10000);
++    if (g_snes->apu->dsp)
++      rc |= write_blob(dir, tag, ".dsp.bin", g_snes->apu->dsp->ram, 0x80);
++    RtlApuUnlock();
++  }
+   write_regs(dir, tag, frame);
+   write_wlog(dir, tag, frame);
+   write_dmas(dir, tag, frame);

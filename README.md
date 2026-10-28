@@ -39,9 +39,10 @@ ROM hack into a native Linux / Windows executable. It is a small SRW1 layer on t
 | Path | What |
 |---|---|
 | `SuperMarioWorldRecomp/` | git submodule → upstream SuperMarioWorldRecomp, pinned at `324dfc8` (it brings `snesrecomp` `5ac4b98`, `recomp-ui`, `SMWDisX`, `asar` as its own submodules) |
-| `patches/SuperMarioWorldRecomp-srw1.patch` | SRW1 build target (`SMW_BUILD_SRW1`), SRW1 reset/NMI handling, F12 options menu + 120 Hz presentation hooks, runtime shader switching |
-| `patches/snesrecomp-srw1.patch` | RetroArch `.glslp` loader fixes: `aliasN`, `PassPrevN` back to the original, bare parameter overrides, `#version` hoisting, `gl_FragColor` compat |
+| `patches/SuperMarioWorldRecomp-srw1.patch` | SRW1 build target (`SMW_BUILD_SRW1`), SRW1 reset/NMI handling, F12 options menu + 120 Hz presentation hooks, runtime shader switching, native (AOT) execution on by default for the SRW1 target |
+| `patches/snesrecomp-srw1.patch` | RetroArch `.glslp` loader fixes: `aliasN`, `PassPrevN` back to the original, bare parameter overrides, `#version` hoisting, `gl_FragColor` compat; opt-in debug aids (`SNESRECOMP_STATE_DUMP_FRAMES` ARAM/DSP state dumps, `SNESRECOMP_NATIVE_STATS` native-share report) |
 | `overlay/src/srw1_*.c/.h` | SRW1 options menu (shader picker, motion mode), 120 Hz render interpolation, HLE stub file |
+| `overlay/recomp/srw1/` | SRW1 recompiler config overlay (`bank00.cfg` interpreter-tier pins for the AddmusicK SPC handshake) and `strip.sed` (drops stale stock entry points) |
 | `overlay/tools/regen_srw1.sh` | Generates `src/gen-srw1/` from **your** patched ROM |
 | `scripts/setup.sh` | Submodules → patches → overlay → shaders → (optional) ROM check + C generation |
 | `scripts/fetch_shaders.sh`, `scripts/stage_shaders.py` | Fetch libretro/glsl-shaders @ `cba01a48` and stage the 88 root presets |
@@ -127,9 +128,22 @@ toolchain file.
 ## Status
 
 - The game boots and runs.
-- Game logic currently runs on the snesrecomp **interpreter** rather than the
-  recompiled native code: a fix for the AddmusicK (sound-driver) routine at
-  `$80:8114` under native code is in progress.
+- **Native recompiled code is on by default.** Roughly **36% of game logic**
+  CPU time now runs as compiled native code (measured over a boot-to-title run
+  with `SNESRECOMP_NATIVE_STATS=1`); everything that has no faithful compiled
+  body yet falls back automatically to snesrecomp's cycle-exact interpreter.
+- AddmusicK fix: the stock SMW SPC-upload HLE stub is dropped (AMK's `$80:8079`
+  uploader is JSL/RTL, not JSR/RTS), the AMK CPU<->SPC handshake entries
+  (`$80:8079`, `$80:80B6`, `$80:80F7`) are kept on the interpreter tier, and
+  stale stock `HandleSPCUploads_*` entry points are stripped
+  (`overlay/recomp/srw1/`). A boot-to-title run matches the interpreter in
+  WRAM and in all uploaded SPC music/sample data.
+- **Known issue:** music playback is phase-shifted by roughly **28–74 ms**
+  relative to interpreter-only mode (same notes and data, slightly different
+  start time), due to the runtime's approximate cycle accounting for compiled code.
+- **Interpreter-only mode:** set `SNESRECOMP_LLE_BOUNCE=0` before launching
+  (e.g. `SNESRECOMP_LLE_BOUNCE=0 ./SuperRyuWorld1SNESRecomp ...`, or
+  `set SNESRECOMP_LLE_BOUNCE=0` in a Windows command prompt).
 - Expect bugs. Report issues with your ROM hash and OS.
 
 ## License
