@@ -27,6 +27,12 @@ void Srw1Interp_EndFrame(void);
  * newest captured frame (-1..0 interpolate, 0..1 extrapolate). Writes a
  * 256x224 XRGB frame with a 1024-byte pitch. False = not available. */
 bool Srw1Interp_RenderSubframe(float f, uint8_t *out);
+/* Side-bar art (options menu "Side art"). On keeps the PPU capture running. */
+void Srw1Interp_SetSideArt(bool on);
+/* Writes a (256+2*extra)x224 XRGB frame of the newest tick's BG2 scenery,
+ * pitch (256+2*extra)*4. *serial tracks the last rendered tick; returns
+ * false when there is nothing new (or no capture yet). */
+bool Srw1Interp_RenderSideArt(uint8_t *out, int extra, uint32_t *serial);
 #ifdef __cplusplus
 }
 #endif

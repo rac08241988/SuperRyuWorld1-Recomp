@@ -1,8 +1,85 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index a6f5aab..a11f2fa 100644
+index a6f5aab..9576196 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -303,3 +303,29 @@ if(SMW_BUILD_COOP)
+@@ -66,6 +66,21 @@ include(${RECOMP_UI_ROOT}/recomp_ui.cmake)
+ find_package(OpenGL REQUIRED)
+ find_package(Python3 REQUIRED COMPONENTS Interpreter)
+ 
++# Super Ryu World 1 setup pack: the shipped source tree carries an SRW1_PACK
++# marker so the launcher's plain "cmake -G Ninja" rebuild configures ONLY the
++# SRW1 executable (no stock SMW gen, no Falcon helper, no Nintendo box art).
++if(EXISTS "${CMAKE_SOURCE_DIR}/SRW1_PACK")
++    set(_srw1_pack_default ON)
++else()
++    set(_srw1_pack_default OFF)
++endif()
++option(SMW_SRW1_PACK "Configure only the Super Ryu World 1 target" ${_srw1_pack_default})
++if(SMW_SRW1_PACK)
++    set(SMW_BUILD_SRW1 ON CACHE BOOL "Build the Super Ryu World 1 executable" FORCE)
++    set(SMW_BUNDLE_FALCON_CACHE_HELPER OFF CACHE BOOL
++        "Bundle the standalone Falcon owner-ROM asset builder" FORCE)
++endif()
++
+ option(SMW_BUNDLE_FALCON_CACHE_HELPER
+     "Bundle the standalone Falcon owner-ROM asset builder" ON)
+ if(SMW_BUNDLE_FALCON_CACHE_HELPER)
+@@ -89,6 +104,7 @@ endif()
+ 
+ set(SMW_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen" CACHE PATH
+     "Generated stock program directory (allows isolated coverage comparisons)")
++if(NOT SMW_SRW1_PACK)
+ file(GLOB SMW_STOCK_GEN_SOURCES CONFIGURE_DEPENDS
+     ${SMW_GEN_DIR}/*.c)
+ if(NOT SMW_STOCK_GEN_SOURCES)
+@@ -116,6 +132,7 @@ add_custom_command(OUTPUT ${SMW_RENDERER_HOOK_STAMP}
+     VERBATIM)
+ set_source_files_properties(${SMW_STOCK_GEN_SOURCES} PROPERTIES
+     OBJECT_DEPENDS ${SMW_RENDERER_HOOK_STAMP})
++endif()
+ 
+ if(SMW_BUILD_COOP)
+     file(GLOB SMW_COOP_GEN_SOURCES CONFIGURE_DEPENDS
+@@ -186,6 +203,13 @@ else()
+     set(_SMW_TRACE 0)
+ endif()
+ 
++if(SMW_SRW1_PACK)
++    # No Nintendo box art in the SRW1 pack (EXISTS-guarded in recomp_ui.cmake).
++    set(SMW_LAUNCHER_BOXART "${CMAKE_SOURCE_DIR}/recomp/srw1/boxart.tga")
++else()
++    set(SMW_LAUNCHER_BOXART "${CMAKE_SOURCE_DIR}/recomp/launcher/boxart.tga")
++endif()
++
+ function(smw_add_recomp_target target_name generated_sources)
+     add_executable(${target_name}
+         ${SMW_RUNTIME_SOURCES}
+@@ -248,7 +272,7 @@ function(smw_add_recomp_target target_name generated_sources)
+     # N64 cartridge or NES pad art next to the exe.
+     recomp_target_launcher_ui(${target_name}
+         CONSOLE snes
+-        BOXART ${CMAKE_SOURCE_DIR}/recomp/launcher/boxart.tga)
++        BOXART ${SMW_LAUNCHER_BOXART})
+     if(SNESRECOMP_ENABLE_LUA)
+         set(_lua_dir "$<TARGET_FILE_DIR:${target_name}>/lua")
+         add_custom_command(TARGET ${target_name} POST_BUILD
+@@ -266,6 +290,7 @@ function(smw_add_recomp_target target_name generated_sources)
+     endif()
+ endfunction()
+ 
++if(NOT SMW_SRW1_PACK)
+ smw_add_recomp_target(SuperMarioWorldSNESRecomp
+     "${SMW_STOCK_GEN_SOURCES}")
+ if(SMW_BUNDLE_FALCON_CACHE_HELPER)
+@@ -279,6 +304,7 @@ endif()
+ # here, and the Linux packaging step fails outright if it is missing.
+ set(SMW_PRELOADED_MODS "${CMAKE_CURRENT_SOURCE_DIR}/mods/preloaded")
+ snesrecomp_target_mod_catalog(SuperMarioWorldSNESRecomp "${SMW_PRELOADED_MODS}")
++endif()
+ 
+ if(SMW_BUILD_COOP)
+     smw_add_recomp_target(SuperMarioWorldCoopSNESRecomp
+@@ -303,3 +329,75 @@ if(SMW_BUILD_COOP)
                  ${CMAKE_SOURCE_DIR}/recomp/coop/smw_coop.ips
                  $<TARGET_FILE_DIR:SuperMarioWorldCoopSNESRecomp>/smw_coop.ips)
  endif()
@@ -11,13 +88,59 @@ index a6f5aab..a11f2fa 100644
 +# target: generated from the user's patched ROM by tools/regen_srw1.sh.
 +option(SMW_BUILD_SRW1 "Build the Super Ryu World 1 executable" OFF)
 +if(SMW_BUILD_SRW1)
-+    file(GLOB SMW_SRW1_GEN_SOURCES CONFIGURE_DEPENDS
-+        ${CMAKE_SOURCE_DIR}/src/gen-srw1/*.c)
-+    if(NOT SMW_SRW1_GEN_SOURCES)
-+        message(FATAL_ERROR "src/gen-srw1/ is empty - run tools/regen_srw1.sh")
++    if(SMW_SRW1_PACK)
++        # The stock SMW mod catalog (MSU-1, widescreen, co-op, Falcon) targets
++        # stock SMW, not SRW1; the pack does not stage it.
++        set_property(GLOBAL APPEND PROPERTY SNESRECOMP_MOD_CATALOG_TARGETS SuperRyuWorld1SNESRecomp)
 +    endif()
-+    smw_add_recomp_target(SuperRyuWorld1SNESRecomp "${SMW_SRW1_GEN_SOURCES}")
-+    target_sources(SuperRyuWorld1SNESRecomp PRIVATE src/srw1_hle.c src/srw1_options.c src/srw1_interp.c)
++    set(SMW_SRW1_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen-srw1" CACHE PATH
++        "Generated Super Ryu World 1 program directory")
++    # Generated C, or (SNESRECOMP_SETUP_HOST=ON, empty gen dir) the setup host
++    # whose only path is the launcher's Generate & rebuild wizard.
++    smw_add_recomp_target(SuperRyuWorld1SNESRecomp "")
++    snesrecomp_target_generated_code(SuperRyuWorld1SNESRecomp "${SMW_SRW1_GEN_DIR}")
++    target_sources(SuperRyuWorld1SNESRecomp PRIVATE src/srw1_hle.c src/srw1_options.c src/srw1_interp.c
++        ${SNESRECOMP_ROOT}/host/snesrecomp_codegen_host.c)
++    target_include_directories(SuperRyuWorld1SNESRecomp PRIVATE
++        ${SNESRECOMP_ROOT}/host ${RECOMP_UI_ROOT}/src)
++    if(SNESRECOMP_SETUP_HOST)
++        # Never-called link placeholders for generated symbols the hand-written
++        # host references (SnesInit refuses to boot a guest in a setup host).
++        # No funcs.h ships in the pack: derive the declarations from the
++        # bank cfgs (no ROM involved) for the setup build only.
++        set(_srw1_setup_inc "${CMAKE_CURRENT_BINARY_DIR}/srw1_setup_include")
++        file(MAKE_DIRECTORY "${_srw1_setup_inc}")
++        execute_process(COMMAND ${Python3_EXECUTABLE}
++            ${CMAKE_SOURCE_DIR}/tools/srw1_generate.py funcs-h ${_srw1_setup_inc}/funcs.h
++            RESULT_VARIABLE _srw1_fh_rc)
++        if(NOT _srw1_fh_rc EQUAL 0)
++            message(FATAL_ERROR "tools/srw1_generate.py funcs-h failed")
++        endif()
++        target_include_directories(SuperRyuWorld1SNESRecomp BEFORE PRIVATE ${_srw1_setup_inc})
++        set(_srw1_setup_stubs "${CMAKE_CURRENT_BINARY_DIR}/srw1_setup_host_stubs.c")
++        execute_process(COMMAND ${Python3_EXECUTABLE}
++            ${CMAKE_SOURCE_DIR}/tools/srw1_setup_stubs.py
++            --funcs-h ${_srw1_setup_inc}/funcs.h
++            --src-root ${CMAKE_SOURCE_DIR}/src --out ${_srw1_setup_stubs}
++            RESULT_VARIABLE _srw1_stub_rc)
++        if(NOT _srw1_stub_rc EQUAL 0)
++            message(FATAL_ERROR "tools/srw1_setup_stubs.py failed")
++        endif()
++        target_sources(SuperRyuWorld1SNESRecomp PRIVATE ${_srw1_setup_stubs})
++    elseif(SMW_SRW1_PACK AND IS_DIRECTORY "${CMAKE_SOURCE_DIR}/shaders")
++        # One-click pack: the game is rebuilt into build/; give it the
++        # shaders/ folder that ships at the pack root.
++        add_custom_command(TARGET SuperRyuWorld1SNESRecomp POST_BUILD
++            COMMAND ${CMAKE_COMMAND} -E copy_directory
++                "${CMAKE_SOURCE_DIR}/shaders"
++                "$<TARGET_FILE_DIR:SuperRyuWorld1SNESRecomp>/shaders"
++            VERBATIM)
++    endif()
++    if(WIN32 AND NOT SNESRECOMP_SETUP_HOST)
++        # Playable Windows build: no console window (logs go to
++        # SuperRyuWorld1.log beside the exe, or a console with --console).
++        set_target_properties(SuperRyuWorld1SNESRecomp PROPERTIES WIN32_EXECUTABLE TRUE)
++    endif()
 +    target_include_directories(SuperRyuWorld1SNESRecomp BEFORE PRIVATE
 +        ${CMAKE_SOURCE_DIR}/recomp/srw1)
 +    # Native AOT on by default for SRW1: replace the stock interpreted-floor
@@ -33,10 +156,10 @@ index a6f5aab..a11f2fa 100644
 +    )
 +endif()
 diff --git a/src/main.c b/src/main.c
-index 4ebfe5f..39297eb 100644
+index 4ebfe5f..76d9cc6 100644
 --- a/src/main.c
 +++ b/src/main.c
-@@ -61,7 +61,11 @@
+@@ -61,7 +61,14 @@
  #include "launcher/launcher_capi.h"
  #endif
  #endif
@@ -45,11 +168,23 @@ index 4ebfe5f..39297eb 100644
 +#ifdef SMW_SRW1_BUILD
 +#include "srw1_options.h"
 +#include "srw1_interp.h"
++#if defined(RECOMP_LAUNCHER)
++#include "snesrecomp_codegen_host.h"
++#endif
 +#endif
  #include "host_report.h"
  #include "audio_trace.h"
  
-@@ -576,11 +580,87 @@ static void DrawPpuFrameWithPerf(void) {
+@@ -194,6 +201,8 @@ static void SetEnvVar(const char *name, const char *value) {
+ 
+ #ifdef SMW_COOP_BUILD
+ static const char kWindowTitle[] = "Super Mario World Co-op (Recompiled)";
++#elif defined(SMW_SRW1_BUILD)
++static const char kWindowTitle[] = "Super Ryu World 1 (Recompiled)";
+ #else
+ static const char kWindowTitle[] = "Super Mario World (Recompiled)";
+ #endif
+@@ -576,11 +585,87 @@ static void DrawPpuFrameWithPerf(void) {
    const uint32 dump_frame = snes_frame_counter ? snes_frame_counter - 1 : 0;
    FrameDump_Present(dump_frame, pixel_buffer, pitch, g_snes_width, g_snes_height);
    FrameDump_Ppu(dump_frame, g_ppu);
@@ -138,7 +273,69 @@ index 4ebfe5f..39297eb 100644
  static uint8 *g_audiobuffer, *g_audiobuffer_cur, *g_audiobuffer_end;
  static int g_frames_per_block;
  static uint8 g_audio_channels;
-@@ -1209,6 +1289,10 @@ int main(int argc, char** argv) {
+@@ -1064,7 +1149,47 @@ static int BuildCoopOutputLeaf(const char *stock_path,
+ }
+ #endif
+ 
++#if defined(_WIN32) && defined(SMW_SRW1_BUILD)
++#include <wchar.h>
++/* The playable Windows build is a GUI-subsystem exe (no console window).
++ * Logs: a terminal launch attaches to that console; --console opens a new
++ * one; otherwise stdout/stderr go to SuperRyuWorld1.log beside the exe. */
++static void Srw1WinRedirectLogs(int argc, char **argv) {
++  int want_console = 0;
++  for (int i = 1; i < argc; i++)
++    if (strcmp(argv[i], "--console") == 0) want_console = 1;
++  HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
++  if (h && h != INVALID_HANDLE_VALUE && !want_console) return; /* console / redirected */
++  if (AttachConsole(ATTACH_PARENT_PROCESS) || (want_console && AllocConsole())) {
++    (void)freopen("CONOUT$", "w", stdout);
++    (void)freopen("CONOUT$", "w", stderr);
++    (void)freopen("CONIN$", "r", stdin);
++    return;
++  }
++  wchar_t path[MAX_PATH + 32];
++  DWORD n = GetModuleFileNameW(NULL, path, MAX_PATH);
++  if (n == 0 || n >= MAX_PATH) return;
++  wchar_t *slash = wcsrchr(path, L'\\');
++  if (!slash) return;
++  wcscpy(slash + 1, L"SuperRyuWorld1.log");
++  FILE *f = _wfreopen(path, L"w", stdout);
++  if (f) f = _wfreopen(path, L"a", stdout);
++  if (f) setvbuf(stdout, NULL, _IONBF, 0);
++  if (_wfreopen(path, L"a", stderr)) setvbuf(stderr, NULL, _IONBF, 0);
++}
++#endif
++
+ int main(int argc, char** argv) {
++#if defined(_WIN32) && defined(SMW_SRW1_BUILD)
++  Srw1WinRedirectLogs(argc, argv);
++  { /* --console is ours; keep it away from the argument parser. */
++    int j = 1;
++    for (int i = 1; i < argc; i++)
++      if (strcmp(argv[i], "--console") != 0) argv[j++] = argv[i];
++    argv[j] = NULL;
++    argc = j;
++  }
++#endif
+ #ifndef _WIN32
+   /* On Windows, do NOT install a SIGSEGV handler: the MSVC CRT's signal
+    * shim intercepts access violations BEFORE the SetUnhandledExceptionFilter
+@@ -1163,7 +1288,13 @@ int main(int argc, char** argv) {
+   rom_argv[1] = NULL;
+   argv = rom_argv;
+   argc = args.rom ? 1 : 0;
++#if defined(SMW_SRW1_BUILD) && defined(SNESRECOMP_SETUP_HOST)
++  /* Setup pack: this binary has no game code; the launcher's builder wizard
++   * (or its hand-off to the rebuilt game) is the only way on. */
++  const int force_launcher = 1;
++#else
+   const int force_launcher = args.force_launcher;
++#endif
+   /* The ROM path is already absolutized by the engine parser. */
+ 
+   /* The config is config.ini next to the executable â€” nothing else,
+@@ -1209,6 +1340,10 @@ int main(int argc, char** argv) {
      g_config.disable_frame_delay = !g_benchmark_audio_paced;
      g_config.skip_launcher = true;
      g_config.fullscreen = 0;
@@ -149,7 +346,7 @@ index 4ebfe5f..39297eb 100644
      g_config.output_method = kOutputMethod_SDL;
    }
  #ifdef SMW_COOP_BUILD
-@@ -1236,7 +1320,13 @@ int main(int argc, char** argv) {
+@@ -1236,7 +1371,13 @@ int main(int argc, char** argv) {
     * skips a 512-byte SMC copier header automatically before hashing,
     * so headered and unheadered dumps both verify against this value. */
    static char rom_path_buf[1024];
@@ -163,7 +360,7 @@ index 4ebfe5f..39297eb 100644
    int rom_resolved_by_launcher = 0;
  
  #ifdef SMW_COOP_BUILD
-@@ -1296,7 +1386,7 @@ int main(int argc, char** argv) {
+@@ -1296,7 +1437,7 @@ int main(int argc, char** argv) {
     * legal — so the Mods page renders empty with no error anywhere. That is
     * what shipped in v0.14.0. */
    int mods_ready = 0;
@@ -172,7 +369,7 @@ index 4ebfe5f..39297eb 100644
    mods_ready = snes_mod_runtime_initialize_c(
        SNES_MOD_CATALOG_ROOT, "super-mario-world-us",
        "0838e531fe22c077528febe14cb3ff7c492f1f5fa8de354192bdff7137c27f5b");
-@@ -1406,6 +1496,8 @@ int main(int argc, char** argv) {
+@@ -1406,6 +1547,8 @@ int main(int argc, char** argv) {
  #endif
  #ifdef SMW_COOP_BUILD
        gi.name = "Super Mario World Co-op";
@@ -181,7 +378,7 @@ index 4ebfe5f..39297eb 100644
  #else
        gi.name = "Super Mario World";
  #endif
-@@ -1419,9 +1511,13 @@ int main(int argc, char** argv) {
+@@ -1419,9 +1562,13 @@ int main(int argc, char** argv) {
        gi.adaptive_view_supported = 0;
  #if SNESRECOMP_ENABLE_MODS
        gi.mods = mods_ready ? snes_mod_runtime_launcher_provider_c() : NULL;
@@ -196,7 +393,73 @@ index 4ebfe5f..39297eb 100644
  #else
  #ifdef SMW_COOP_BUILD
        gi.widescreen_supported = 0;
-@@ -1692,7 +1788,7 @@ int main(int argc, char** argv) {
+@@ -1444,12 +1591,43 @@ int main(int argc, char** argv) {
+       gi.netplay = SmwNetplayLauncherCallbacks();
+ #endif
+ 
++#if defined(RECOMP_LAUNCHER) && defined(SMW_SRW1_BUILD)
++      /* One-click builder: Browse ROM -> generate C locally -> cmake rebuild
++       * -> relaunch the playable build/ executable. No-ops when the source
++       * tree / SDK is not beside the exe (a developer build). */
++      {
++        static SnesrecompCodegenHostConfig srw1_cg;
++        memset(&srw1_cg, 0, sizeof(srw1_cg));
++        srw1_cg.display_name = "Super Ryu World 1";
++        srw1_cg.snesrecomp_cli_relpath = "tools/srw1_generate.py";
++        srw1_cg.cfg_dir = "recomp";
++        srw1_cg.out_dir = "src/gen-srw1";
++        srw1_cg.funcs_h = "recomp/srw1/funcs.h";
++        srw1_cg.gen_marker_relpath = "src/gen-srw1/dispatch_v2.c";
++        srw1_cg.build_dir_name = "build";
++        srw1_cg.cmake_target = "SuperRyuWorld1SNESRecomp";
++        srw1_cg.exe_basename = "SuperRyuWorld1SNESRecomp";
++        srw1_cg.expected_sha256 =
++            "d7c20cdf42e66a9b81d49359affd4e3548de5855444faceccfac8a1c845bf57f";
++        srw1_cg.cfg_roots = 1;
++        srw1_cg.prepare_note =
++            "Builds the game from your own Super Ryu World 1 ROM: generates C "
++            "locally, compiles it, then starts the game. Takes a few minutes.";
++        srw1_cg.prepare_note_windows =
++            "Builds the game from your own Super Ryu World 1 ROM: generates C "
++            "locally, then a console window compiles it (a few minutes) and "
++            "starts the game.";
++        snesrecomp_codegen_host_apply(&gi, &srw1_cg);
++      }
++#endif
+ #if defined(RECOMP_LAUNCHER)
+       /* cwd is anchored to the exe dir (snesrecomp_anchor_to_exe_dir above),
+        * and recomp_ui.cmake stages assets to <exe>/assets, so "." resolves
+        * assets correctly. */
+ #ifdef SMW_COOP_BUILD
+       int act = recomp_launcher_run_window("Super Mario World Co-op \xE2\x80\x94 Launcher",
++#elif defined(SMW_SRW1_BUILD)
++      int act = recomp_launcher_run_window("Super Ryu World 1 \xE2\x80\x94 Launcher",
+ #else
+       int act = recomp_launcher_run_window("Super Mario World \xE2\x80\x94 Launcher",
+ #endif
+@@ -1469,6 +1647,21 @@ int main(int argc, char** argv) {
+ #endif
+       host_report_breadcrumb("launcher: action=%d rom=%s", act,
+                              rom_path_buf[0] ? rom_path_buf : "(none)");
++#if defined(RECOMP_LAUNCHER) && defined(SMW_SRW1_BUILD)
++      if (act == RECOMP_LAUNCHER_RESULT_RELAUNCH) {
++        /* Sources generated and rebuilt: hand off to the new binary. */
++        snesrecomp_codegen_host_relaunch_or_exit(rom_path_buf);
++        return 0;
++      }
++#if defined(SNESRECOMP_SETUP_HOST)
++      if (act == RECOMP_LAUNCHER_RESULT_LAUNCH) {
++        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, kWindowTitle,
++            "This is the setup program. Pick your ROM and click "
++            "\"Generate & rebuild\" to build the game first.", NULL);
++        return 0;
++      }
++#endif
++#endif
+       if (act == 1) {
+ #if defined(RECOMP_LAUNCHER) && defined(SMW_COOP_BUILD)
+         snprintf(g_config.netplay_player_name,
+@@ -1692,7 +1885,7 @@ int main(int argc, char** argv) {
    }
    const char *spawn = getenv("SMW_ENEMY_SPAWN");
    if (spawn && *spawn) g_smw_video.adaptive_spawns = strcmp(spawn, "original") != 0;
@@ -205,7 +468,7 @@ index 4ebfe5f..39297eb 100644
    g_smw_video.enabled = false;
  #endif
    g_ws_active = false;
-@@ -1701,7 +1797,10 @@ int main(int argc, char** argv) {
+@@ -1701,7 +1894,10 @@ int main(int argc, char** argv) {
        SnesDisplayAspect_Clamp(g_config.display_aspect));
    g_snes_width = g_smw_viewport.width;
    extern void SmwRendererInstallHooks(void);
@@ -216,7 +479,7 @@ index 4ebfe5f..39297eb 100644
    if (!SmwCoopInstallHooks()) {
      fprintf(stderr, "Unable to install native co-op guest hooks.\n");
      return 1;
-@@ -2098,6 +2197,11 @@ error_reading:;
+@@ -2098,6 +2294,11 @@ error_reading:;
        case SDL_CONTROLLERBUTTONDOWN:
        case SDL_CONTROLLERBUTTONUP: {
          gi = GetGamepadInfo(SNESRECOMP_SDL_EVENT_BUTTON_DEVICE(event));
@@ -228,7 +491,7 @@ index 4ebfe5f..39297eb 100644
          if (gi) {
            int b = RemapSdlButton(SNESRECOMP_SDL_EVENT_BUTTON(event));
            if (b >= 0)
-@@ -2127,11 +2231,20 @@ error_reading:;
+@@ -2127,11 +2328,20 @@ error_reading:;
            running = false;
            break;
          }
@@ -251,7 +514,7 @@ index 4ebfe5f..39297eb 100644
          HandleInput(SNESRECOMP_SDL_EVENT_KEY(event),
                      SNESRECOMP_SDL_EVENT_MOD(event), false);
          break;
-@@ -2159,11 +2272,25 @@ error_reading:;
+@@ -2159,11 +2369,25 @@ error_reading:;
        SDL_Delay(16);
        continue;
      }
@@ -280,7 +543,7 @@ index 4ebfe5f..39297eb 100644
  
      // Clear gamepad inputs when joypad directional inputs to avoid wonkiness
      if (g_input_state & 0xf0)
-@@ -2323,6 +2450,11 @@ error_reading:;
+@@ -2323,6 +2547,11 @@ error_reading:;
      g_snes->disableRender = g_turbo && (frameCtr & 0xf) != 0;
  
      if (!g_snes->disableRender) {
@@ -293,10 +556,10 @@ index 4ebfe5f..39297eb 100644
      } else {
        /* Turbo (render skipped): SmwDrawPpuFrame / draw_ppu_frame is NOT purely
 diff --git a/src/opengl.c b/src/opengl.c
-index 68135ae..37713f0 100644
+index 68135ae..94c706a 100644
 --- a/src/opengl.c
 +++ b/src/opengl.c
-@@ -16,7 +16,57 @@ static size_t g_screen_buffer_size;
+@@ -16,7 +16,208 @@ static size_t g_screen_buffer_size;
  static int g_draw_width, g_draw_height;
  static unsigned int g_program, g_VAO;
  static GlTextureWithSize g_texture;
@@ -306,6 +569,7 @@ index 68135ae..37713f0 100644
 +#ifdef SMW_SRW1_BUILD
 +#include "srw1_options.h"
 +#include <stdlib.h>
++#include <string.h>
 +static bool g_gl_ready;
 +static unsigned g_gl_present_count;
 +
@@ -324,6 +588,156 @@ index 68135ae..37713f0 100644
 +}
 +
 +bool OpenGLRenderer_IsActive(void) { return g_gl_ready; }
++
++/* ---- Side-bar art -------------------------------------------------------
++ * The pillarbox bars show the current stage's own background (BG2) carried
++ * past the 4:3 frame, re-rasterized each tick from the live PPU state by
++ * Srw1Interp_RenderSideArt, then softened and darkened here so it reads as
++ * decoration. The game image itself stays 4:3 and untouched. */
++#include "srw1_interp.h"
++enum { kSideExtra = 160, kSideW = 256 + 2 * kSideExtra, kSideH = 224 };
++static unsigned g_side_tex, g_side_prog, g_side_vao, g_side_vbo;
++static uint8 *g_side_buf;
++static uint32_t g_side_serial;
++static bool g_side_valid, g_side_init_failed;
++
++static unsigned SideCompile(GLenum type, const char *src) {
++  unsigned sh = glCreateShader(type);
++  glShaderSource(sh, 1, &src, NULL);
++  glCompileShader(sh);
++  int ok = 0;
++  glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
++  if (!ok) {
++    char log[512];
++    glGetShaderInfoLog(sh, sizeof(log), NULL, log);
++    fprintf(stderr, "[srw1] side-art shader: %s\n", log);
++  }
++  return sh;
++}
++
++static bool SideInit(void) {
++  if (g_side_prog) return true;
++  if (g_side_init_failed) return false;
++  const char *vs = "#version 330 core\n" CODE(
++    layout(location = 0) in vec2 aPos;
++    layout(location = 1) in vec2 aUv;
++    out vec2 uv;
++    void main(void) { gl_Position = vec4(aPos, 0.0, 1.0); uv = aUv; }
++  );
++  const char *fs = "#version 330 core\n" CODE(
++    in vec2 uv;
++    out vec4 FragColor;
++    uniform sampler2D tex;
++    uniform vec2 texel;
++    uniform float inner;
++    void main(void) {
++      vec3 c = texture(tex, uv).rgb * 0.2;
++      c += texture(tex, uv + vec2(texel.x * 1.5, 0.0)).rgb * 0.1;
++      c += texture(tex, uv - vec2(texel.x * 1.5, 0.0)).rgb * 0.1;
++      c += texture(tex, uv + vec2(0.0, texel.y * 1.5)).rgb * 0.1;
++      c += texture(tex, uv - vec2(0.0, texel.y * 1.5)).rgb * 0.1;
++      c += texture(tex, uv + texel * 1.5).rgb * 0.1;
++      c += texture(tex, uv - texel * 1.5).rgb * 0.1;
++      c += texture(tex, uv + vec2(texel.x, -texel.y) * 1.5).rgb * 0.1;
++      c += texture(tex, uv - vec2(texel.x, -texel.y) * 1.5).rgb * 0.1;
++      float d = abs(uv.x - 0.5) * 2.0;
++      float k = 0.62 - 0.30 * smoothstep(inner, 1.0, d);
++      FragColor = vec4(c * k, 1.0);
++    }
++  );
++  unsigned v = SideCompile(GL_VERTEX_SHADER, vs), f = SideCompile(GL_FRAGMENT_SHADER, fs);
++  unsigned prog = glCreateProgram();
++  glAttachShader(prog, v);
++  glAttachShader(prog, f);
++  glLinkProgram(prog);
++  int ok = 0;
++  glGetProgramiv(prog, GL_LINK_STATUS, &ok);
++  if (!ok) {
++    g_side_init_failed = true;
++    fprintf(stderr, "[srw1] side-art program failed to link; bars stay black\n");
++    return false;
++  }
++  g_side_buf = (uint8 *)calloc((size_t)kSideW * kSideH, 4);
++  glGenTextures(1, &g_side_tex);
++  glBindTexture(GL_TEXTURE_2D, g_side_tex);
++  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, kSideW, kSideH, 0, GL_BGRA,
++               GL_UNSIGNED_INT_8_8_8_8_REV, g_side_buf);
++  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++  glGenVertexArrays(1, &g_side_vao);
++  glGenBuffers(1, &g_side_vbo);
++  glBindVertexArray(g_side_vao);
++  glBindBuffer(GL_ARRAY_BUFFER, g_side_vbo);
++  glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * 12, NULL, GL_DYNAMIC_DRAW);
++  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
++  glEnableVertexAttribArray(0);
++  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
++  glEnableVertexAttribArray(1);
++  g_side_prog = prog;
++  return true;
++}
++
++static void SideQuad(float *v, float x0, float x1, float y0, float y1,
++                     float u0, float u1) {
++  const float q[6][4] = {
++    {x0, y0, u0, 1.0f}, {x1, y0, u1, 1.0f}, {x0, y1, u0, 0.0f},
++    {x1, y0, u1, 1.0f}, {x1, y1, u1, 0.0f}, {x0, y1, u0, 0.0f},
++  };
++  memcpy(v, q, sizeof(q));
++}
++
++static void Srw1DrawSideArt(int dw, int dh, int vx, int vy, int vw, int vh) {
++  if (!Srw1Options_SideArt()) { g_side_valid = false; g_side_serial = 0; return; }
++  if (vx <= 0 || vw <= 0 || dw <= 0 || dh <= 0) return;
++  if (!SideInit()) return;
++  if (Srw1Interp_RenderSideArt(g_side_buf, kSideExtra, &g_side_serial)) {
++    glBindTexture(GL_TEXTURE_2D, g_side_tex);
++    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kSideW, kSideH, GL_BGRA,
++                    GL_UNSIGNED_INT_8_8_8_8_REV, g_side_buf);
++    g_side_valid = true;
++    const char *dump = getenv("SRW1_SIDE_DUMP"); /* test hook: raw PPM */
++    static bool dumped;
++    if (dump && !dumped && g_gl_present_count >= 400 && (dumped = true)) {
++      FILE *f = fopen(dump, "wb");
++      if (f) {
++        fprintf(f, "P6\n%d %d\n255\n", kSideW, kSideH);
++        for (int i = 0; i < kSideW * kSideH; i++) {
++          uint8 rgb[3] = {g_side_buf[i * 4 + 2], g_side_buf[i * 4 + 1], g_side_buf[i * 4]};
++          fwrite(rgb, 1, 3, f);
++        }
++        fclose(f);
++      }
++    }
++  }
++  if (!g_side_valid) return;
++  float sx = (float)vw / 256.0f;                 /* screen px per SNES px */
++  float bar = (float)kSideExtra * sx;
++  float lx0 = (float)vx - bar, lx1 = (float)vx;
++  float rx0 = (float)(vx + vw), rx1 = (float)(vx + vw) + bar;
++  float nx = 2.0f / (float)dw, ny = 2.0f / (float)dh;
++  float y0 = (float)vy * ny - 1.0f, y1 = (float)(vy + vh) * ny - 1.0f;
++  float ue = (float)kSideExtra / (float)kSideW;
++  float v[48];
++  SideQuad(v, lx0 * nx - 1.0f, lx1 * nx - 1.0f, y0, y1, 0.0f, ue);
++  SideQuad(v + 24, rx0 * nx - 1.0f, rx1 * nx - 1.0f, y0, y1, 1.0f - ue, 1.0f);
++  glViewport(0, 0, dw, dh);
++  glUseProgram(g_side_prog);
++  glActiveTexture(GL_TEXTURE0);
++  glBindTexture(GL_TEXTURE_2D, g_side_tex);
++  glUniform1i(glGetUniformLocation(g_side_prog, "tex"), 0);
++  glUniform2f(glGetUniformLocation(g_side_prog, "texel"), 1.0f / kSideW, 1.0f / kSideH);
++  glUniform1f(glGetUniformLocation(g_side_prog, "inner"), 256.0f / (float)kSideW);
++  glBindVertexArray(g_side_vao);
++  glBindBuffer(GL_ARRAY_BUFFER, g_side_vbo);
++  glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v), v);
++  glDrawArrays(GL_TRIANGLES, 0, 12);
++  glBindTexture(GL_TEXTURE_2D, g_texture.gl_texture);
++  /* GLSL presets set attribute state on whatever VAO is bound; hand the
++   * renderer's own VAO back so they never clobber the side-art VAO. */
++  glBindVertexArray(g_VAO);
++}
 +
 +/* Test hook: SRW1_GL_SHOT=<file.ppm> SRW1_GL_SHOT_FRAME=<n> writes the final
 + * (post-shader) back buffer of the n-th presented frame. */
@@ -355,7 +769,7 @@ index 68135ae..37713f0 100644
  
  static void GL_APIENTRY MessageCallback(GLenum source,
                  GLenum type,
-@@ -136,8 +186,21 @@ static bool OpenGLRenderer_Init(SDL_Window *window) {
+@@ -136,8 +337,21 @@ static bool OpenGLRenderer_Init(SDL_Window *window) {
      printf("%s\n", infolog);
    }
  
@@ -379,13 +793,31 @@ index 68135ae..37713f0 100644
    
    return true;
  }
-@@ -200,8 +263,12 @@ static void OpenGLRenderer_EndDraw(void) {
+@@ -190,6 +404,13 @@ static void OpenGLRenderer_EndDraw(void) {
+ 
+   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+   glClear(GL_COLOR_BUFFER_BIT);
++#ifdef SMW_SRW1_BUILD
++  /* Shader passes may clear the whole default framebuffer, so with a
++   * shader active the bars are drawn after the final pass instead. */
++  if (g_glsl_shader == NULL)
++    Srw1DrawSideArt(drawable_width, drawable_height, viewport_x, viewport_y,
++                  viewport_width, viewport_height);
++#endif
+ 
+   if (g_glsl_shader == NULL) {
+     glViewport(viewport_x, viewport_y, viewport_width, viewport_height);
+@@ -200,8 +421,16 @@ static void OpenGLRenderer_EndDraw(void) {
      glBindVertexArray(g_VAO);
      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
    } else {
 -    GlslShader_Render(g_glsl_shader, &g_texture, viewport_x, viewport_y, viewport_width, viewport_height);
 -  }
 +    GlslShader_Render(g_glsl_shader, &g_texture, viewport_x, viewport_y, viewport_width, viewport_height);
++#ifdef SMW_SRW1_BUILD
++    Srw1DrawSideArt(drawable_width, drawable_height, viewport_x, viewport_y,
++                    viewport_width, viewport_height);
++#endif
 +  }
 +#ifdef SMW_SRW1_BUILD
 +  g_gl_present_count++;

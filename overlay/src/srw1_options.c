@@ -17,6 +17,9 @@
 static const char *const kMotionLabels[] = {"Off", "Interpolate", "Low-latency"};
 static const char *const kMotionKeys[] = {"off", "interpolate", "lowlatency"};
 
+static const char *const kOnOffLabels[] = {"Off", "On"};
+static bool g_side_art = true; /* stage art in the pillarbox bars */
+
 static int parse_motion(const char *v) {
   for (int i = 0; i < 3; i++)
     if (strcmp(v, kMotionKeys[i]) == 0) return i;
@@ -72,33 +75,43 @@ static char *make_label(const char *path) {
 static void save_choice(void) {
   FILE *f = fopen(SRW1_OPTIONS_FILE, "w");
   if (!f) return;
-  fprintf(f, "# Written by the in-game options menu (F12). Edit there.\n");
+  fprintf(f, "# Written by the in-game options menu (Esc / F12). Edit there.\n");
   fprintf(f, "ShaderPreset = %s\n", g_current > 0 ? g_paths[g_current] : "");
   fprintf(f, "MotionMode = %s\n", kMotionKeys[Srw1Interp_GetMode()]);
+  fprintf(f, "SideArt = %s\n", g_side_art ? "on" : "off");
   fclose(f);
 }
 
 static void load_motion(void) {
-  int m = -1;
+  int m = -1, side = -1;
   FILE *f = fopen(SRW1_OPTIONS_FILE, "r");
   if (f) {
     char line[256];
     while (fgets(line, sizeof(line), f)) {
-      if (strncmp(line, "MotionMode", 10) != 0) continue;
+      bool is_motion = strncmp(line, "MotionMode", 10) == 0;
+      bool is_side = strncmp(line, "SideArt", 7) == 0;
+      if (!is_motion && !is_side) continue;
       char *v = strchr(line, '=');
       if (!v) continue;
       v++;
       while (*v == ' ' || *v == '\t') v++;
       size_t l = strlen(v);
       while (l && (v[l - 1] == '\n' || v[l - 1] == '\r' || v[l - 1] == ' ')) v[--l] = 0;
-      m = parse_motion(v);
+      if (is_motion) m = parse_motion(v);
+      else side = (strcmp(v, "off") == 0 || strcmp(v, "0") == 0) ? 0 : 1;
     }
     fclose(f);
   }
   const char *env = getenv("SRW1_MOTION"); /* test override */
   if (env && parse_motion(env) >= 0) m = parse_motion(env);
+  const char *senv = getenv("SRW1_SIDE_ART"); /* test override: 0/1 */
+  if (senv && senv[0]) side = senv[0] != '0';
+  if (side >= 0) g_side_art = side != 0;
+  Srw1Interp_SetSideArt(g_side_art);
   if (m >= 0) Srw1Interp_SetMode((Srw1MotionMode)m);
 }
+
+bool Srw1Options_SideArt(void) { return g_side_art; }
 
 static int load_choice(void) {
   const char *env = getenv("SRW1_SHADER_PRESET"); /* test override */
@@ -130,7 +143,7 @@ static int load_choice(void) {
 
 static const RecompRuntimeUiItem *g_items;
 
-enum { kItemShader, kItemMotion, kItemResume, kItemCount };
+enum { kItemShader, kItemMotion, kItemSideArt, kItemResume, kItemCount };
 
 
 static int ui_get(void *ctx, const RecompRuntimeUiItem *item, int *out) {
@@ -143,6 +156,10 @@ static int ui_get(void *ctx, const RecompRuntimeUiItem *item, int *out) {
     *out = (int)Srw1Interp_GetMode();
     return 1;
   }
+  if (item == &g_items[kItemSideArt]) {
+    *out = g_side_art ? 1 : 0;
+    return 1;
+  }
   return 0;
 }
 
@@ -153,6 +170,15 @@ static int ui_set(void *ctx, const RecompRuntimeUiItem *item, int value) {
     Srw1Interp_SetMode((Srw1MotionMode)value);
     save_choice();
     snprintf(g_status, sizeof(g_status), "Motion: %s", kMotionLabels[value]);
+    recomp_runtime_ui_set_status(g_ui, g_status);
+    return 1;
+  }
+  if (item == &g_items[kItemSideArt]) {
+    if (value < 0 || value > 1) return 0;
+    g_side_art = value != 0;
+    Srw1Interp_SetSideArt(g_side_art);
+    save_choice();
+    snprintf(g_status, sizeof(g_status), "Side art: %s", kOnOffLabels[value]);
     recomp_runtime_ui_set_status(g_ui, g_status);
     return 1;
   }
@@ -221,6 +247,17 @@ void Srw1Options_Init(void) {
   items[kItemMotion].step = 1;
   items[kItemMotion].choices = kMotionLabels;
   items[kItemMotion].choice_count = 3;
+  items[kItemSideArt].key = "graphics.side_art";
+  items[kItemSideArt].section = "Video";
+  items[kItemSideArt].label = "Side art";
+  items[kItemSideArt].description =
+      "Fill the side bars with the stage's own background. Off = black bars.";
+  items[kItemSideArt].type = RECOMP_RUNTIME_UI_CHOICE;
+  items[kItemSideArt].minimum = 0;
+  items[kItemSideArt].maximum = 1;
+  items[kItemSideArt].step = 1;
+  items[kItemSideArt].choices = kOnOffLabels;
+  items[kItemSideArt].choice_count = 2;
   items[kItemResume].key = RECOMP_RUNTIME_UI_KEY_RESUME;
   items[kItemResume].section = "Video";
   items[kItemResume].label = "Resume";
@@ -261,7 +298,8 @@ static bool feed(RecompRuntimeUiInput in, bool pressed, bool repeat) {
 bool Srw1Options_HandleKey(int key, bool pressed, bool repeat) {
   Srw1Options_Init();
   if (!g_ui) return false;
-  if (key == SDLK_F12) {
+  /* F12 and Escape both open/close the menu (Escape never quits). */
+  if (key == SDLK_F12 || key == SDLK_ESCAPE) {
     if (pressed && !repeat) Srw1Options_Toggle();
     return true;
   }
@@ -273,7 +311,7 @@ bool Srw1Options_HandleKey(int key, bool pressed, bool repeat) {
   case SDLK_RIGHT: return feed(RECOMP_RUNTIME_UI_INPUT_RIGHT, pressed, repeat);
   case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE:
     return feed(RECOMP_RUNTIME_UI_INPUT_ACCEPT, pressed, repeat);
-  case SDLK_ESCAPE: case SDLK_BACKSPACE:
+  case SDLK_BACKSPACE:
     return feed(RECOMP_RUNTIME_UI_INPUT_BACK, pressed, repeat);
   default: return true; /* swallow everything else while open */
   }

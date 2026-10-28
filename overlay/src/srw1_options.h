@@ -14,6 +14,8 @@ void Srw1Options_Init(void);
 /* Preset path to load when the OpenGL renderer starts, or NULL. */
 const char *Srw1Options_StartupShader(void);
 bool Srw1Options_IsOpen(void);
+/* Options menu "Side art" (default On). */
+bool Srw1Options_SideArt(void);
 void Srw1Options_Toggle(void);
 /* Returns true when the event belongs to the menu (keep it from the game). */
 bool Srw1Options_HandleKey(int sdl_keycode, bool pressed, bool repeat);

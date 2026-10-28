@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdio.h>
 
 #define kRegBytes offsetof(Ppu, vramPointer) /* register snapshot prefix */
 #define kLines 225
@@ -25,15 +26,20 @@ static int g_cur = -1;      /* index of the newest complete capture */
 static int g_filling = 0;   /* capture being written by the live raster */
 static uint32_t g_serial;
 static Ppu *g_scratch;
+static Ppu *g_side_scratch;
+static bool g_sideart;
+
+static inline bool capturing(void) { return g_mode != kSrw1Motion_Off || g_sideart; }
+void Srw1Interp_SetSideArt(bool on) { g_sideart = on; }
 
 Srw1MotionMode Srw1Interp_GetMode(void) { return g_mode; }
 void Srw1Interp_SetMode(Srw1MotionMode m) {
   g_mode = m;
-  if (m == kSrw1Motion_Off) g_cur = -1; /* drop history; restart cleanly */
+  if (m == kSrw1Motion_Off && !g_sideart) g_cur = -1; /* drop history */
 }
 
 void Srw1Interp_CaptureLine(Ppu *ppu, int line) {
-  if (g_mode == kSrw1Motion_Off || line < 0 || line >= kLines) return;
+  if (!capturing() || line < 0 || line >= kLines) return;
   Capture *c = &g_cap[g_filling];
   if (line == 0) {
     if (!c->start) c->start = (Ppu *)malloc(sizeof(Ppu));
@@ -48,7 +54,7 @@ void Srw1Interp_CaptureLine(Ppu *ppu, int line) {
 }
 
 void Srw1Interp_EndFrame(void) {
-  if (g_mode == kSrw1Motion_Off) return;
+  if (!capturing()) return;
   Capture *c = &g_cap[g_filling];
   if (!c->start) return;
   c->complete = true;
@@ -160,5 +166,49 @@ bool Srw1Interp_RenderSubframe(float f, uint8_t *out) {
     }
     ppu_drawCapturedLine(s, line, true);
   }
+  return true;
+}
+
+/* Side-bar art: re-rasterize the newest captured frame with `extra` columns
+ * of widescreen margin per side, keeping only the scenery layer (BG2) and
+ * the backdrop (with the game's color math). Sprites, the playfield (BG1)
+ * and the HUD (BG3) are left out, so the bars show the stage's own background continuing past
+ * the 4:3 frame without revealing gameplay. Everything comes from the live
+ * PPU state (VRAM/CGRAM/scroll), nothing is stored on disk. */
+bool Srw1Interp_RenderSideArt(uint8_t *out, int extra, uint32_t *serial) {
+  if (!g_sideart || g_cur < 0) return false;
+  Capture *C = &g_cap[g_cur];
+  if (!C->complete || !C->start) return false;
+  if (serial && *serial == C->serial) return false; /* unchanged */
+  if (extra > kPpuExtraLeftRight) extra = kPpuExtraLeftRight;
+  if (!g_side_scratch) g_side_scratch = (Ppu *)malloc(sizeof(Ppu));
+  if (!g_side_scratch) return false;
+  Ppu *s = g_side_scratch;
+  memcpy(s, C->start, sizeof(Ppu));
+  s->renderBuffer = out;
+  s->renderPitch = (uint32_t)(256 + 2 * extra) * 4;
+  memset(&s->mode7Hd, 0, sizeof(s->mode7Hd));
+  for (int i = 0; i < kPpuOverlaySource_Count; i++) s->overlayRenderBuffer[i] = NULL;
+  s->widescreenLineEnhancer = NULL;
+  s->widescreenLineEnhancerContext = NULL;
+  s->extraObjectCount = 0;
+  PpuSetExtraSpace(s, (uint16_t)extra);
+  for (int line = 0; line < kLines; line++) {
+    memcpy(s, C->regs[line], kRegBytes);
+    memcpy(s->cgram, C->cgram[line], sizeof(s->cgram));
+    if (line == 100 && getenv("SRW1_SIDE_DEBUG"))
+      fprintf(stderr, "[side] main=%02x sub=%02x adsub=%02x wsel=%02x fixed=%04x cg0=%04x mode=%02x\n",
+              s->screenEnabled[0], s->screenEnabled[1], s->cgadsub, s->cgwsel,
+              (unsigned)s->fixedColor, s->cgram[0], s->bgmode);
+    /* BG2 scenery only, on whichever screen the game put it (a sub-screen
+     * BG2 is added onto the backdrop by the game's own color math). */
+    s->screenEnabled[0] &= 0x02;
+    s->screenEnabled[1] &= 0x02;
+    s->screenWindowed[0] = s->screenWindowed[1] = 0;
+    /* Color math stays: SMW-style backdrops are often fixed-color math. */
+    s->cgwsel &= (uint8_t)~0xf0; /* no window clip / math-prevent regions */
+    ppu_drawCapturedLine(s, line, true);
+  }
+  if (serial) *serial = C->serial;
   return true;
 }
