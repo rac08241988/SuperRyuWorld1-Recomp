@@ -13,8 +13,8 @@ How to play
 3. Click Browse and pick your own Super Ryu World 1 ROM (a patched Super
    Mario World ROM, 2 MB, SHA-256
    d7c20cdf42e66a9b81d49359affd4e3548de5855444faceccfac8a1c845bf57f).
-4. Click the build button. The first time, it downloads a portable compiler
-   (about a few hundred MB) into the toolchain\ folder here, generates the
+4. Click "Generate & rebuild...".  The first time, it downloads a portable compiler
+   (roughly 800 MB once unpacked) into the toolchain\ folder here, generates the
    game code from your ROM and compiles it. This takes a few minutes.
 5. When it finishes, press Play. Later launches go straight to the game.
 

@@ -61,7 +61,8 @@ list_repo() { # repo-dir prefix
   | grep -vE '(^|/)funcs\.h$' \
   | grep -viE '\.(sfc|smc|swc|fig|srm|ips|bps|ups)$' \
   | grep -vE '^recomp/launcher/boxart\.tga$|^recomp/disassembly-layout\.json$' \
-  | grep -vE '^third_party/|^docs/|^tests/|^mods/|^packages/|^dist/|^build' \
+  | grep -vE '^third_party/(SMWDisX|asar)(/|$)|^docs/|^tests?/|^mods/|^packages/|^dist/|^build|^_triage/' \
+  | grep -vE '^[^/]+\.md$|^smw\.sln$|^lz2_ref\.py$|^\.mcp\.json$|^\.git(ignore|modules|attributes)$' \
   | grep -vE '^(snesrecomp|recomp-ui)/(tests|docs)/' \
   | grep -vE '^snesrecomp/recompiler-rs/target/' \
   | sort -u > "$ROOT/.build/pack-files.txt"
@@ -89,7 +90,7 @@ if d:
     print("analyzer stamp", d[:16])
 PY
 cp "$ROOT/scripts/release/README.txt" "$WORK/README.txt"
-cp "$ROOT/LICENSE" "$WORK/LICENSE.txt"
+cmp -s "$ROOT/LICENSE" "$WORK/LICENSE" || cp "$ROOT/LICENSE" "$WORK/LICENSE"
 cp "$ROOT/NOTICE.md" "$WORK/NOTICE.md"
 {
   echo "SuperRyuWorld1-Recomp $(git -C "$ROOT" rev-parse HEAD)"
@@ -103,11 +104,11 @@ cp "$ROOT/NOTICE.md" "$WORK/NOTICE.md"
 fail() { echo "make_release_zip: $*" >&2; exit 1; }
 find "$WORK" \( -iname '*.sfc' -o -iname '*.smc' -o -iname '*.fig' -o -iname '*.swc' \
   -o -iname '*.srm' -o -iname '*.ips' -o -iname '*.bps' -o -iname '*.ups' \) | grep -q . && fail "ROM/patch file in pack"
-find "$WORK/src" -path '*/gen*' | grep -q . && fail "generated C dir in pack"
+find "$WORK/src" -mindepth 1 -maxdepth 1 -type d \( -name 'gen*' -o -name '.gen*' \) | grep -q . && fail "generated C dir in pack"
 find "$WORK" -name funcs.h | grep -q . && fail "funcs.h in pack"
 [ -e "$WORK/recomp/launcher/boxart.tga" ] && fail "stock box art in pack"
 [ "$(find "$WORK" -maxdepth 1 -iname '*.exe' | wc -l)" -eq 1 ] || fail "expected exactly one top-level exe"
-for f in snesrecomp/snesrecomp_cli.py tools/srw1_generate.py recomp/bank00.cfg recomp/srw1/bank00.cfg CMakeLists.txt VERSION config.ini; do
+for f in snesrecomp/snesrecomp_cli.py tools/srw1_generate.py recomp/bank00.cfg recomp/srw1/bank00.cfg CMakeLists.txt config.ini third_party/gl_core/gl_core_3_1.c third_party/gl_core/gl_core_3_1.h third_party/stb/stb_image.h; do
   [ -f "$WORK/$f" ] || fail "required file missing: $f"; done
 grep -rlI -e '/workspace/' -e '/home/box' "$WORK" --include='*.c' --include='*.h' --include='*.py' --include='*.cmake' --include='*.txt' --include='*.cfg' --include='*.ini' | grep -q . && fail "local path leaked into pack"
 

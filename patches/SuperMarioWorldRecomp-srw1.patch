@@ -156,7 +156,7 @@ index a6f5aab..9576196 100644
 +    )
 +endif()
 diff --git a/src/main.c b/src/main.c
-index 4ebfe5f..76d9cc6 100644
+index 4ebfe5f..cdfd769 100644
 --- a/src/main.c
 +++ b/src/main.c
 @@ -61,7 +61,14 @@
@@ -479,7 +479,29 @@ index 4ebfe5f..76d9cc6 100644
    if (!SmwCoopInstallHooks()) {
      fprintf(stderr, "Unable to install native co-op guest hooks.\n");
      return 1;
-@@ -2098,6 +2294,11 @@ error_reading:;
+@@ -1927,8 +2123,11 @@ error_reading:;
+     if (g_audio_device == 0) {
+       host_report_breadcrumb("audio device open FAILED: %s", SDL_GetError());
+       printf("Failed to open audio device: %s\n", SDL_GetError());
+-      return 1;
+-    }
++      /* SRW1: no output device (unplugged headset, RDP, VM) must not stop
++       * the game from starting; run silently instead. */
++      fprintf(stderr, "[srw1] no audio device; continuing without sound\n");
++      g_config.enable_audio = false;
++    } else {
+     g_audio_channels = 2;
+     /* One native DSP block is 534 samples at the SPC's true output rate
+      * of 32040 Hz (1.024 MHz / 32). The old divisor of 32000 understated
+@@ -1950,6 +2149,7 @@ error_reading:;
+         have.samples,
+ #endif
+         g_frames_per_block);
++    }
+   } else {
+     host_report_breadcrumb("audio disabled in config");
+   }
+@@ -2098,6 +2298,11 @@ error_reading:;
        case SDL_CONTROLLERBUTTONDOWN:
        case SDL_CONTROLLERBUTTONUP: {
          gi = GetGamepadInfo(SNESRECOMP_SDL_EVENT_BUTTON_DEVICE(event));
@@ -491,7 +513,7 @@ index 4ebfe5f..76d9cc6 100644
          if (gi) {
            int b = RemapSdlButton(SNESRECOMP_SDL_EVENT_BUTTON(event));
            if (b >= 0)
-@@ -2127,11 +2328,20 @@ error_reading:;
+@@ -2127,11 +2332,20 @@ error_reading:;
            running = false;
            break;
          }
@@ -514,7 +536,7 @@ index 4ebfe5f..76d9cc6 100644
          HandleInput(SNESRECOMP_SDL_EVENT_KEY(event),
                      SNESRECOMP_SDL_EVENT_MOD(event), false);
          break;
-@@ -2159,11 +2369,25 @@ error_reading:;
+@@ -2159,11 +2373,25 @@ error_reading:;
        SDL_Delay(16);
        continue;
      }
@@ -543,7 +565,7 @@ index 4ebfe5f..76d9cc6 100644
  
      // Clear gamepad inputs when joypad directional inputs to avoid wonkiness
      if (g_input_state & 0xf0)
-@@ -2323,6 +2547,11 @@ error_reading:;
+@@ -2323,6 +2551,11 @@ error_reading:;
      g_snes->disableRender = g_turbo && (frameCtr & 0xf) != 0;
  
      if (!g_snes->disableRender) {
@@ -555,6 +577,18 @@ index 4ebfe5f..76d9cc6 100644
        DrawPpuFrameWithPerf();
      } else {
        /* Turbo (render skipped): SmwDrawPpuFrame / draw_ppu_frame is NOT purely
+@@ -3186,6 +3419,11 @@ static const char kDefaultConfigIniContent[] =
+   "\n"
+   "# Remove the sprite limits per scan line\n"
+   "NoSpriteLimits = 1\n"
++#ifdef SMW_SRW1_BUILD
++  "\n"
++  "# SDL, SDL-Software or OpenGL. Shaders and side-bar art need OpenGL.\n"
++  "OutputMethod = OpenGL\n"
++#endif
+   "\n"
+   "[Sound]\n"
+   "EnableAudio = 1\n"
 diff --git a/src/opengl.c b/src/opengl.c
 index 68135ae..94c706a 100644
 --- a/src/opengl.c
