@@ -1,13 +1,24 @@
 # Super Ryu World 1 — Native PC Port (Recomp tooling)
 
+> ### Easy install
+> 1. **Install** through Quiver Launcher, or download `SuperRyuWorld1-SNESRecomp-windows-x64-v1.1.3.zip` from
+>    [Releases](https://github.com/rac08241988/SuperRyuWorld1-Recomp/releases/latest) and unzip it.
+> 2. **Make the ROM:** open the `patch` folder and drag your clean
+>    **Super Mario World (USA)** ROM onto **`Patch My ROM.bat`** (or double-click it
+>    and pick the ROM). It saves **`Super Ryu World 1.sfc`** in that folder.
+> 3. **Play:** open `SuperRyuWorld1SNESRecomp.exe`; in the first-run setup click **Browse ROM**,
+>    pick the new `Super Ryu World 1.sfc`, then **Generate & rebuild...**
+>
+> Details and manual patching: [Patching the ROM](#patching-the-rom).
+
 ## How to play (Windows)
 
-1. Download `SuperRyuWorld1-SNESRecomp-windows-x64-v1.1.1.zip` from
+1. Download `SuperRyuWorld1-SNESRecomp-windows-x64-v1.1.3.zip` from
    [Releases](https://github.com/rac08241988/SuperRyuWorld1-Recomp/releases/latest)
 2. Unzip it
 3. Open `SuperRyuWorld1SNESRecomp.exe`
-4. Click **Browse ROM** and pick your own Super Ryu World 1 ROM (patched SMW — see
-   [How to patch the SNES ROM](#how-to-patch-the-snes-rom-step-by-step))
+4. Click **Browse ROM** and pick your own Super Ryu World 1 ROM (patched SMW — easiest with `patch\Patch My ROM.bat`, see
+   [Patching the ROM](#patching-the-rom))
 5. Click **Generate & rebuild...**, wait a few minutes, then play
 
 The first launch downloads a portable compiler (roughly 800 MB once unpacked) into `toolchain\`
@@ -21,9 +32,19 @@ panel, **Alt+Enter** toggles fullscreen.
 
 ![Gameplay](docs/screenshots/gameplay.png)
 
+## What's new in v1.1.3
+
+- Bundled the official patch file and added patching instructions. The
+  release zip now has a `patch/` folder with **Aguni\_**'s official
+  `Super Ryu World 1.bps`, **`Patch My ROM.bat`** (drag-and-drop patcher that checks your
+  Super Mario World ROM, removes a copier header and verifies the result),
+  Floating IPS (`patch/flips/flips.exe`) and `HOW_TO_PATCH.txt`. The `.bps` is
+  also attached on its own to the release. The game files are unchanged
+  from v1.1.1.
+
 ## What's new in v1.1.2
 
-- **Docs only:** new [How to patch the SNES ROM](#how-to-patch-the-snes-rom-step-by-step)
+- **Docs only:** new [Patching the ROM](#patching-the-rom)
   section with step-by-step Floating IPS and Rom Patcher JS instructions,
   clean-ROM hashes, and headered vs headerless ROMs. The game files are
   unchanged; the download is still the v1.1.1 zip.
@@ -79,11 +100,13 @@ ROM hack into a native Linux / Windows executable. It is a small SRW1 layer on t
 [SuperMarioWorldRecomp](https://github.com/mstan/SuperMarioWorldRecomp) and the
 [snesrecomp](https://github.com/RetroPortingToolKit/snesrecomp) framework.
 
-> **No ROM, patch, or game data is included in this repository or its release.**
-> There is no ROM, no patched ROM, no BPS/IPS patch and no generated C derived
-> from a ROM. The release zip contains only the recompiler sources/tooling, a
-> small setup program and a prebuilt analyzer; all game-specific C is generated
-> and compiled locally on your machine from your ROM.
+> **No ROM or game data is included in this repository or its release.**
+> There is no ROM, no patched ROM and no generated C derived from a ROM. The
+> release zip contains the recompiler sources/tooling, a small setup program, a
+> prebuilt analyzer, and in `patch/` the hack's official `.bps` patch file
+> (the hack author's own work, redistributed for convenience; it contains no
+> Nintendo data) plus Floating IPS. All game-specific C is generated and
+> compiled locally on your machine from your ROM.
 >
 > This project is not affiliated with, endorsed by, or sponsored by Nintendo.
 > Super Mario World is a trademark of Nintendo.
@@ -123,7 +146,7 @@ ignored while the window is not focused. Button mapping is unchanged.
 - **Super Ryu World** is by **Aguni_** —
   [SMW Central listing](https://www.smwcentral.net/?a=details&id=18268). All
   credit for the hack's levels, graphics, music and design goes to the author.
-  Get the patch only from that official page.
+  The patch bundled in `patch/` is the unmodified official one from that page.
 - **[SuperMarioWorldRecomp](https://github.com/mstan/SuperMarioWorldRecomp)** and
   **[snesrecomp](https://github.com/RetroPortingToolKit/snesrecomp)** by
   Matthew Stanley — the recompiler and runtime this port is built on (PolyForm
@@ -136,7 +159,7 @@ ignored while the window is not focused. Button mapping is unchanged.
   upstream submodules.
 - **[libretro/glsl-shaders](https://github.com/libretro/glsl-shaders)** — the
   shader presets offered in the options menu. Not vendored; fetched at setup.
-- **[Floating IPS](https://github.com/Alcaro/Flips)** by Alcaro, for applying the BPS patch.
+- **[Floating IPS](https://github.com/Alcaro/Flips)** by Alcaro (GPLv3), for applying the BPS patch; v198 is bundled unmodified as `patch/flips/flips.exe`.
 
 ## What's in this repo
 
@@ -154,75 +177,89 @@ ignored while the window is not focused. Button mapping is unchanged.
 | `scripts/release/README.txt` | README shipped inside the zip |
 | `scripts/setup.sh` | Submodules → patches → overlay → shaders → (optional) ROM check + C generation |
 | `scripts/fetch_shaders.sh`, `scripts/stage_shaders.py` | Fetch libretro/glsl-shaders @ `cba01a48` and stage the 88 root presets |
+| `patch/` | The hack's official `Super Ryu World 1.bps` (by Aguni\_), `Patch My ROM.bat`, `HOW_TO_PATCH.txt`; the release packager adds Floating IPS v198 into `patch/flips/` |
 | `cmake/mingw-w64.cmake` | Toolchain file for Windows x64 cross-builds from Linux |
 
-## How to patch the SNES ROM (step by step)
+## Patching the ROM
 
-The port never ships a ROM or a patch. You make the Super Ryu World 1 ROM yourself from
-your own Super Mario World cartridge dump and the hack's official patch.
+The game is a ROM hack, so you make its ROM yourself from your own Super Mario
+World ROM and the hack's official patch, which comes with this release.
 
-### What you need
+### 1. What you need
 
-1. **A clean Super Mario World (USA) ROM** (your own dump). The known-good
-   headerless file is 524,288 bytes (512 KiB) with:
-   - CRC32 `B19ED489`
-   - SHA-1 `6B47BB75D16514B6A476AA0C73A683A2A4C18765`
-   - SHA-256 `0838E531FE22C077528FEBE14CB3FF7C492F1F5FA8DE354192BDFF7137C27F5B`
+**Super Mario World (USA)**, the original 1990 SNES release, unmodified (your own dump):
 
-   (No-Intro "Super Mario World (USA)", as listed by
-   [superfamicom.org](https://superfamicom.org/info/super-mario-world) and
-   [TASVideos](https://tasvideos.org/Games/99/Versions/View/3712).)
-2. **The hack's patch** from its SMW Central page:
-   <https://www.smwcentral.net/?a=details&id=18268> (Super Ryu World by Aguni_).
-   Download the zip and unpack it; the patch is the `.bps` file inside.
-3. **A patcher**: [Floating IPS (Flips)](https://github.com/Sir-Walrus/Flips/releases)
-   on Windows, or the browser-based [Rom Patcher JS](https://www.marcrobledo.com/RomPatcher.js/).
+| | |
+|---|---|
+| File | unheadered `.sfc`, **524,288 bytes** (512 KB) |
+| CRC32 | `B19ED489` |
+| SHA-1 | `6b47bb75d16514b6a476aa0c73a683a2a4c18765` |
+| SHA-256 | `0838e531fe22c077528febe14cb3ff7c492f1f5fa8de354192bdff7137c27f5b` |
 
-### Headered vs headerless ROMs
+- A **headered `.smc`** (524,800 bytes: an extra 512-byte copier header) must
+  have the header removed first, or use a patcher that handles it
+  (`Patch My ROM.bat` and Rom Patcher JS both can).
+- **Not** the Japanese, European, or *Super Mario All-Stars + Super Mario World* versions.
 
-Some dumps (usually `.smc` files) start with an extra 512-byte "copier
-header". Headerless: 524,288 bytes. Headered: 524,800 bytes. The hashes
-above are for the **headerless** file. BPS patches check the input ROM,
-so if the patcher says the ROM is wrong, it is most likely headered.
-Remove the header first: Rom Patcher JS can do it for you (enable its
-header-removal option before applying), or use a header tool such as
-SMW Central's or Lunar Magic's. The port itself accepts the patched ROM
-with or without a header (it strips the 512 bytes before checking the hash).
+### 2. Where the patch is
 
-### Patch with Floating IPS (Windows)
+- Inside the release zip at **`patch/Super Ryu World 1.bps`** — so also in your Quiver install
+  folder after installing through Quiver (`<install folder>\patch\`).
+- Attached on its own next to the zip on the
+  [GitHub release page](https://github.com/rac08241988/SuperRyuWorld1-Recomp/releases/latest).
+- In this repository at [`patch/`](patch/).
 
-1. Download `flips-windows.zip` from the [Flips releases page](https://github.com/Sir-Walrus/Flips/releases) and unzip it anywhere.
-2. Run `flips.exe`.
-3. Click **Apply Patch**.
-4. Pick the hack's `.bps` file.
-5. Pick your clean, headerless Super Mario World (USA) ROM.
-6. Choose where to save the result and give it a name, for example
-   `Super Ryu World 1.sfc` (keep the `.sfc` or `.smc` extension).
-7. Flips reports success. If it says the input ROM is wrong, check the
-   ROM against the hashes above and remove a copier header if there is one.
+### 3a. Easiest: Patch My ROM.bat (Windows)
 
-Command-line alternative: `flips --apply patch.bps smw.sfc "Super Ryu World 1.sfc"`.
+1. Open the `patch` folder.
+2. Drag your Super Mario World (USA) ROM onto **`Patch My ROM.bat`**, or
+   double-click it and pick the ROM in the window that opens.
+3. It removes a copier header if there is one, checks the ROM is CRC32
+   `B19ED489` (otherwise it says *"This isn't a clean Super Mario World (USA)
+   ROM. You need the original USA version, unmodified."*), applies the patch with
+   the bundled Floating IPS, checks the result and saves **`Super Ryu World 1.sfc`** in the
+   `patch` folder.
 
-### Patch online with Rom Patcher JS
+### 3b. Floating IPS (Windows)
+
+1. Run `patch\flips\flips.exe` (bundled; or get it from the
+   [Floating IPS releases](https://github.com/Alcaro/Flips/releases)).
+2. Click **Apply Patch**.
+3. Pick `patch\Super Ryu World 1.bps`.
+4. Pick your clean Super Mario World (USA) ROM.
+5. Save the result, e.g. as `Super Ryu World 1.sfc`.
+
+Command line: `flips --apply "Super Ryu World 1.bps" smw.sfc "Super Ryu World 1.sfc"`.
+
+### 3c. Online: Rom Patcher JS
 
 1. Open <https://www.marcrobledo.com/RomPatcher.js/>.
-2. **ROM file**: choose your clean Super Mario World (USA) ROM.
-3. **Patch file**: choose the hack's `.bps`.
-4. Click **Apply patch**; your browser downloads the patched ROM.
-   Everything runs locally in your browser, nothing is uploaded.
+2. **ROM file**: your clean Super Mario World (USA) ROM (if it is headered, tick
+   the option to remove the header).
+3. **Patch file**: `Super Ryu World 1.bps`.
+4. Click **Apply patch**; the browser saves the patched ROM. Everything runs
+   locally in your browser.
 
-### Pick the patched ROM in the launcher
+### 4. Check the result and use it
 
-1. Unzip the release and open `SuperRyuWorld1SNESRecomp.exe`.
-2. Click **Browse ROM** and choose the patched ROM you just made
-   (`.sfc` or `.smc`, headered or not). The launcher shows it as OK when
-   the hash matches (headerless SHA-256 `d7c20cdf42e66a9b81d49359affd4e3548de5855444faceccfac8a1c845bf57f`).
-3. Click **Generate & rebuild...** and wait a few minutes (the first run
-   downloads a portable compiler). The game starts when it is done; later
-   launches only need **Play**.
+- The patched ROM is 2,097,152 bytes (2 MiB), **CRC32 `D6A6317E`**
+  (SHA-256 `d7c20cdf42e66a9b81d49359affd4e3548de5855444faceccfac8a1c845bf57f`).
+- Open `SuperRyuWorld1SNESRecomp.exe`; in the first-run setup click **Browse ROM**, pick the
+  patched ROM (`.sfc` or `.smc`, headered or not), then **Generate &
+  rebuild...** (the first run downloads a portable compiler; later launches only
+  need **Play**).
+- If the patcher or the launcher refuses the ROM, your Super Mario World ROM is
+  not the clean USA release, or you have a different release of the hack.
 
-If the launcher refuses the ROM, you have a different release of the hack
-or a modified ROM: re-patch from a clean SMW (USA) ROM with the patch above.
+### Credits for the patch
+
+**Super Ryu World 1** is by **Aguni\_** —
+[SMW Central page](https://www.smwcentral.net/?a=details&id=18268&p=section).
+`patch/Super Ryu World 1.bps` is the hack author's own work, the official patch from that page,
+redistributed unchanged for convenience. It contains only the hack's changes
+and **no Nintendo data**; you still need your own Super Mario World ROM.
+[Floating IPS](https://github.com/Alcaro/Flips) (`patch/flips/flips.exe`, v198)
+is by Alcaro, GPLv3; see `patch/flips/SOURCE.txt`.
 
 ## ROMs you need (bring your own)
 
@@ -231,6 +268,7 @@ or a modified ROM: re-patch from a clean SMW (USA) ROM with the patch above.
    (The upstream build also needs the stock SMW C generated from it.)
 2. **Super Ryu World 1 "Definitive"**, patched by you: download the official
    BPS from the [SMW Central page](https://www.smwcentral.net/?a=details&id=18268)
+   (also bundled as `patch/Super Ryu World 1.bps`)
    and apply it to the clean headerless ROM above with
    [Floating IPS](https://github.com/Alcaro/Flips)
    (`flips --apply SuperRyuWorld.bps smw.sfc srw1.sfc`, or the Flips GUI).
@@ -239,7 +277,8 @@ or a modified ROM: re-patch from a clean SMW (USA) ROM with the patch above.
    If your hash differs (e.g. your SMW ROM had a 512-byte header, or you have a
    different release of the hack), the tooling will refuse it.
 
-ROMs, `*.bps`/`*.ips` and generated C are git-ignored; never commit them.
+ROMs and generated C are git-ignored; never commit them. The only patch in the
+repo is the hack's official `patch/Super Ryu World 1.bps`.
 
 ## Build — Linux
 
@@ -293,8 +332,9 @@ cross-builds a **setup host** — the SRW1 target configured with
 directory, linking placeholder stubs — plus the Rust analyzer for
 `x86_64-pc-windows-gnu`, then stages the tracked SMW / snesrecomp / recomp-ui
 sources (minus ROM data, generated code, docs and tests), the shaders and the
-configs into a flat zip. Guards fail the build if any ROM/patch file, generated
-C or `funcs.h` ends up in it.
+configs into a flat zip. It also copies `patch/` (the hack's official `.bps`, `Patch My ROM.bat`,
+`HOW_TO_PATCH.txt`) and Floating IPS v198 into the zip. Guards fail the build if
+any ROM, any other patch file, generated C or `funcs.h` ends up in it.
 
 On the player's PC the setup exe shows a first-run wizard: it downloads the
 portable `cmake-clang-v1` toolchain from

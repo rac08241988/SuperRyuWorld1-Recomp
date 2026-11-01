@@ -31,12 +31,19 @@ In game
   Log file        SuperRyuWorld1.log beside the game exe (or run it with
                   --console to see a console window)
 
-Getting the ROM
----------------
-Super Ryu World is by Aguni_. Download the official patch from its SMW Central
-page (https://www.smwcentral.net/?a=details&id=18268) and apply it with
-Floating IPS to a clean, headerless Super Mario World (USA) ROM. No ROM, patch
-or game data is included here.
+Getting the ROM (easy way)
+--------------------------
+You need Super Mario World (USA), the original SNES release, unmodified
+(CRC32 B19ED489). Then:
+1. Open the patch\ folder and drag your Super Mario World ROM onto
+   "Patch My ROM.bat" (or double-click it and pick the ROM).
+2. It saves "Super Ryu World 1.sfc" in the patch\ folder (CRC32 D6A6317E).
+3. In the first-run setup, click Browse and pick that "Super Ryu World 1.sfc".
+Manual steps (Floating IPS, Rom Patcher JS) are in patch\HOW_TO_PATCH.txt.
+
+The patch (patch\Super Ryu World 1.bps) is Aguni_'s official patch from SMW Central,
+redistributed unchanged; it contains no Nintendo data. Floating IPS
+(patch\flips\flips.exe) is by Alcaro, GPLv3. No ROM is included here.
 
 Source, issues and technical details:
   https://github.com/rac08241988/SuperRyuWorld1-Recomp

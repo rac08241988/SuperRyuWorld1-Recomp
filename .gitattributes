@@ -1,3 +1,7 @@
 *.patch -text
 *.sh text eol=lf
 *.bat -text
+patch/*.bat -text
+patch/*.txt -text
+patch/flips/*.txt -text
+patch/*.bps binary

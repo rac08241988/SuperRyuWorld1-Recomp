@@ -1,0 +1,40 @@
+HOW TO MAKE THE SUPER RYU WORLD 1 ROM
+=====================================
+
+This game needs a patched ROM. You make it yourself from your own copy of
+Super Mario World and the official patch in this folder.
+
+What you need
+-------------
+Super Mario World (USA) - the original 1990 SNES release, unmodified.
+  Headerless .sfc: 524,288 bytes (512 KB)
+  CRC32  B19ED489
+  SHA-1  6b47bb75d16514b6a476aa0c73a683a2a4c18765
+A headered .smc (524,800 bytes) is fine for "Patch My ROM.bat" (it removes
+the header). The Japanese, European and Super Mario All-Stars versions do
+NOT work.
+
+EASY WAY (Windows)
+------------------
+1. Drag your Super Mario World (USA) ROM onto "Patch My ROM.bat"
+   (or double-click it and pick the ROM).
+2. It checks the ROM, applies the patch with Floating IPS and saves
+   "Super Ryu World 1.sfc" in this folder (CRC32 D6A6317E).
+3. Open the game's exe, click Browse ROM in the first-run setup and pick
+   "Super Ryu World 1.sfc".
+
+Manual way
+----------
+Floating IPS: run flips\flips.exe, click Apply Patch, pick
+  "Super Ryu World 1.bps", pick your clean (headerless) ROM, save as "Super Ryu World 1.sfc".
+Online: https://www.marcrobledo.com/RomPatcher.js/ - ROM file = your clean
+  ROM, Patch file = "Super Ryu World 1.bps", Apply patch.
+The result must have CRC32 D6A6317E.
+
+Credits
+-------
+"Super Ryu World 1.bps" is Aguni_'s work (the Super Ryu World 1 ROM hack), from its official
+SMW Central page: https://www.smwcentral.net/?a=details&id=18268&p=section
+It is redistributed unchanged for convenience. It contains only the hack's
+changes and no Nintendo data; you still need your own Super Mario World ROM.
+Floating IPS (flips\flips.exe) is by Alcaro, GPLv3 - see flips\SOURCE.txt.

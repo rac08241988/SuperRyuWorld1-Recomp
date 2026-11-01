@@ -94,6 +94,13 @@ cmp -s "$ROOT/LICENSE" "$WORK/LICENSE" || cp "$ROOT/LICENSE" "$WORK/LICENSE"
 cp "$ROOT/NOTICE.md" "$WORK/NOTICE.md"
 mkdir -p "$WORK/licenses" && cp "$ROOT"/overlay/licenses/* "$WORK/licenses/"
 cp "$ROOT/uninstall.bat" "$WORK/uninstall.bat"
+# patch/: the hack's official .bps, Patch My ROM.bat, HOW_TO_PATCH.txt, and
+# Floating IPS v198 (official Windows build, GPLv3) fetched and hash-checked.
+cp -r "$ROOT/patch" "$WORK/patch"
+FLIPS_ZIP="$ROOT/.build/flips-windows-v198.zip"
+[ -f "$FLIPS_ZIP" ] || curl -fsSL -o "$FLIPS_ZIP" https://github.com/Alcaro/Flips/releases/download/v198/flips-windows.zip
+echo "802bfb315dca08a2f765dd6864472ecbb2b482681045c573d5e4b657b8e5295d  $FLIPS_ZIP" | sha256sum -c -
+python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$FLIPS_ZIP" "$WORK/patch/flips"
 {
   echo "SuperRyuWorld1-Recomp $(git -C "$ROOT" rev-parse HEAD)"
   echo "SuperMarioWorldRecomp $(git -C "$UP" rev-parse HEAD) + patches/SuperMarioWorldRecomp-srw1.patch"
@@ -105,7 +112,8 @@ cp "$ROOT/uninstall.bat" "$WORK/uninstall.bat"
 # 5. Hard guards: nothing ROM-derived, no generated C, one top-level exe.
 fail() { echo "make_release_zip: $*" >&2; exit 1; }
 find "$WORK" \( -iname '*.sfc' -o -iname '*.smc' -o -iname '*.fig' -o -iname '*.swc' \
-  -o -iname '*.srm' -o -iname '*.ips' -o -iname '*.bps' -o -iname '*.ups' \) | grep -q . && fail "ROM/patch file in pack"
+  -o -iname '*.srm' -o -iname '*.ips' -o -iname '*.bps' -o -iname '*.ups' \) -not -path "$WORK/patch/*.bps" | grep -q . && fail "ROM/patch file in pack"
+[ "$(find "$WORK/patch" -maxdepth 1 -iname '*.bps' | wc -l)" -eq 1 ] || fail "expected exactly one .bps in patch/"
 find "$WORK/src" -mindepth 1 -maxdepth 1 -type d \( -name 'gen*' -o -name '.gen*' \) | grep -q . && fail "generated C dir in pack"
 find "$WORK" -name funcs.h | grep -q . && fail "funcs.h in pack"
 [ -e "$WORK/recomp/launcher/boxart.tga" ] && fail "stock box art in pack"

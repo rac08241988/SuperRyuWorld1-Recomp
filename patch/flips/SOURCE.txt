@@ -1,0 +1,10 @@
+Floating IPS (Flips) v198 by Alcaro - Windows x64 build, unmodified.
+License: GNU GPL version 3 or later (see COPYING and COPYING.gpl3 in this folder).
+
+Downloaded from the official release:
+  https://github.com/Alcaro/Flips/releases/tag/v198  (flips-windows.zip)
+  flips.exe SHA-256: ca6b364ccb23ab83ff0f4458f589eac001e7baf74315decde73c878a8eb519fd
+
+Complete corresponding source code for this exact build:
+  https://github.com/Alcaro/Flips/tree/v198  (commit 359d414cff73b3e0400871d3c288a59b36564834)
+  https://github.com/Alcaro/Flips/archive/refs/tags/v198.zip
