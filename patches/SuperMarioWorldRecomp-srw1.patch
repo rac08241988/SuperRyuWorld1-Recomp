@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index a6f5aab..9576196 100644
+index a6f5aab..b195f29 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -66,6 +66,21 @@ include(${RECOMP_UI_ROOT}/recomp_ui.cmake)
@@ -99,7 +99,7 @@ index a6f5aab..9576196 100644
 +    # whose only path is the launcher's Generate & rebuild wizard.
 +    smw_add_recomp_target(SuperRyuWorld1SNESRecomp "")
 +    snesrecomp_target_generated_code(SuperRyuWorld1SNESRecomp "${SMW_SRW1_GEN_DIR}")
-+    target_sources(SuperRyuWorld1SNESRecomp PRIVATE src/srw1_hle.c src/srw1_options.c src/srw1_interp.c
++    target_sources(SuperRyuWorld1SNESRecomp PRIVATE src/srw1_hle.c src/srw1_options.c src/rpanel.c src/srw1_interp.c
 +        ${SNESRECOMP_ROOT}/host/snesrecomp_codegen_host.c)
 +    target_include_directories(SuperRyuWorld1SNESRecomp PRIVATE
 +        ${SNESRECOMP_ROOT}/host ${RECOMP_UI_ROOT}/src)
@@ -156,7 +156,7 @@ index a6f5aab..9576196 100644
 +    )
 +endif()
 diff --git a/src/config.c b/src/config.c
-index 9a8201e..5038002 100644
+index 9a8201e..4e8985c 100644
 --- a/src/config.c
 +++ b/src/config.c
 @@ -429,6 +429,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
@@ -185,7 +185,7 @@ index 9a8201e..5038002 100644
    };
    const int N = (int)countof(kvs);
    snprintf(kvs[0].val, sizeof(kvs[0].val), "%d", g_config.window_scale ? g_config.window_scale : 3);
-@@ -677,7 +682,22 @@ void WriteConfigFile(const char *filename) {
+@@ -677,7 +682,31 @@ void WriteConfigFile(const char *filename) {
    snprintf(kvs[12].val, sizeof(kvs[12].val), "%d", g_config.deadzone[1]);
    g_config.keyboard_players = (int8)(g_config.has_keyboard_controls & 3);
    snprintf(kvs[13].val, sizeof(kvs[13].val), "%u", g_config.has_keyboard_controls & 3);
@@ -203,13 +203,22 @@ index 9a8201e..5038002 100644
 +  snprintf(kvs[0].val, sizeof(kvs[0].val), "%d", g_config.background_input ? 1 : 0);
 +  CfgWriteKvs(filename, kvs, 1);
 +}
++
++/* Persist one key (the in-game Options panel), every other line untouched. */
++void WriteConfigKey(const char *filename, const char *section, const char *key, const char *val) {
++  if (filename == NULL)
++    filename = "config.ini";
++  CfgKV kvs[1] = { { section, key } };
++  snprintf(kvs[0].val, sizeof(kvs[0].val), "%s", val);
++  CfgWriteKvs(filename, kvs, 1);
++}
  
 +static void CfgWriteKvs(const char *filename, CfgKV *kvs, int N) {
    /* Read the existing file (may be absent on a fresh extract). */
    char *data = NULL;
    long sz = 0;
 diff --git a/src/config.h b/src/config.h
-index 2b6c8e5..963eeb6 100644
+index 2b6c8e5..d267f1f 100644
 --- a/src/config.h
 +++ b/src/config.h
 @@ -75,6 +75,7 @@ typedef struct Config {
@@ -220,15 +229,16 @@ index 2b6c8e5..963eeb6 100644
  
    // Persistent lobby identity. Empty on first boot so recomp-ui asks the
    // player to choose a display name before exposing host/join actions.
-@@ -130,5 +131,6 @@ void ConfigReloadKeyMap(const char *filename);
+@@ -130,5 +131,7 @@ void ConfigReloadKeyMap(const char *filename);
  // with a surgical, comment-preserving in-place update. Called after the GUI
  // launcher returns PLAY so the chosen settings survive the next boot.
  void WriteConfigFile(const char *filename);
 +void WriteConfigBackgroundInput(const char *filename);
++void WriteConfigKey(const char *filename, const char *section, const char *key, const char *val);
  int FindCmdForSdlKey(SDL_Keycode code, SDL_Keymod mod);
  int FindCmdForGamepadButton(int button, uint32 modifiers);
 diff --git a/src/main.c b/src/main.c
-index 4ebfe5f..5d934c8 100644
+index 4ebfe5f..52cbc20 100644
 --- a/src/main.c
 +++ b/src/main.c
 @@ -61,7 +61,14 @@
@@ -361,7 +371,40 @@ index 4ebfe5f..5d934c8 100644
  static uint8 *g_audiobuffer, *g_audiobuffer_cur, *g_audiobuffer_end;
  static int g_frames_per_block;
  static uint8 g_audio_channels;
-@@ -1064,7 +1158,47 @@ static int BuildCoopOutputLeaf(const char *stock_path,
+@@ -905,6 +999,32 @@ static void SdlRenderer_EndDraw(void) {
+   SDL_RenderClear(g_renderer);
+   snesrecomp_sdl_render_texture(
+       g_renderer, g_texture, &g_sdl_renderer_rect, &g_sdl_destination);
++#ifdef SMW_SRW1_BUILD
++  {
++    static SDL_Texture *layer_tex;
++    static int layer_w, layer_h;
++    const uint32_t *argb;
++    int ow = 0, oh = 0, lx, ly, lw, lh;
++    SdlRenderer_GetOutputSize(&ow, &oh);
++    if (Srw1Options_Layer(ow, oh, g_sdl_destination.x, g_sdl_destination.y,
++                          g_sdl_destination.w, g_sdl_destination.h,
++                          &argb, &lx, &ly, &lw, &lh)) {
++      if (!layer_tex || layer_w != lw || layer_h != lh) {
++        if (layer_tex) SDL_DestroyTexture(layer_tex);
++        layer_tex = SDL_CreateTexture(g_renderer, SDL_PIXELFORMAT_ARGB8888,
++                                      SDL_TEXTUREACCESS_STREAMING, lw, lh);
++        layer_w = lw;
++        layer_h = lh;
++        if (layer_tex) SDL_SetTextureBlendMode(layer_tex, SDL_BLENDMODE_BLEND);
++      }
++      if (layer_tex) {
++        SDL_Rect dst = {lx, ly, lw, lh};
++        SDL_UpdateTexture(layer_tex, NULL, argb, lw * 4);
++        snesrecomp_sdl_render_texture(g_renderer, layer_tex, NULL, &dst);
++      }
++    }
++  }
++#endif
+   SDL_RenderPresent(g_renderer); // vsyncs to 60 FPS?
+ }
+ 
+@@ -1064,7 +1184,47 @@ static int BuildCoopOutputLeaf(const char *stock_path,
  }
  #endif
  
@@ -409,7 +452,7 @@ index 4ebfe5f..5d934c8 100644
  #ifndef _WIN32
    /* On Windows, do NOT install a SIGSEGV handler: the MSVC CRT's signal
     * shim intercepts access violations BEFORE the SetUnhandledExceptionFilter
-@@ -1163,7 +1297,13 @@ int main(int argc, char** argv) {
+@@ -1163,7 +1323,13 @@ int main(int argc, char** argv) {
    rom_argv[1] = NULL;
    argv = rom_argv;
    argc = args.rom ? 1 : 0;
@@ -423,7 +466,7 @@ index 4ebfe5f..5d934c8 100644
    /* The ROM path is already absolutized by the engine parser. */
  
    /* The config is config.ini next to the executable â€” nothing else,
-@@ -1189,6 +1329,9 @@ int main(int argc, char** argv) {
+@@ -1189,6 +1355,9 @@ int main(int argc, char** argv) {
     * above + OFN_NOCHANGEDIR on the file dialogs). EnsureConfigIni already created
     * it next to the exe; this keeps a stray chdir from relocating later writes. */
    static char config_exe_path[1024];
@@ -433,7 +476,7 @@ index 4ebfe5f..5d934c8 100644
    if (!config_file &&
        snesrecomp_exe_dir_path("config.ini", config_exe_path, sizeof(config_exe_path)))
      config_file = config_exe_path;
-@@ -1209,6 +1352,10 @@ int main(int argc, char** argv) {
+@@ -1209,6 +1378,10 @@ int main(int argc, char** argv) {
      g_config.disable_frame_delay = !g_benchmark_audio_paced;
      g_config.skip_launcher = true;
      g_config.fullscreen = 0;
@@ -444,7 +487,7 @@ index 4ebfe5f..5d934c8 100644
      g_config.output_method = kOutputMethod_SDL;
    }
  #ifdef SMW_COOP_BUILD
-@@ -1236,7 +1383,13 @@ int main(int argc, char** argv) {
+@@ -1236,7 +1409,13 @@ int main(int argc, char** argv) {
     * skips a 512-byte SMC copier header automatically before hashing,
     * so headered and unheadered dumps both verify against this value. */
    static char rom_path_buf[1024];
@@ -458,7 +501,7 @@ index 4ebfe5f..5d934c8 100644
    int rom_resolved_by_launcher = 0;
  
  #ifdef SMW_COOP_BUILD
-@@ -1296,7 +1449,7 @@ int main(int argc, char** argv) {
+@@ -1296,7 +1475,7 @@ int main(int argc, char** argv) {
     * legal — so the Mods page renders empty with no error anywhere. That is
     * what shipped in v0.14.0. */
    int mods_ready = 0;
@@ -467,7 +510,7 @@ index 4ebfe5f..5d934c8 100644
    mods_ready = snes_mod_runtime_initialize_c(
        SNES_MOD_CATALOG_ROOT, "super-mario-world-us",
        "0838e531fe22c077528febe14cb3ff7c492f1f5fa8de354192bdff7137c27f5b");
-@@ -1406,6 +1559,8 @@ int main(int argc, char** argv) {
+@@ -1406,6 +1585,8 @@ int main(int argc, char** argv) {
  #endif
  #ifdef SMW_COOP_BUILD
        gi.name = "Super Mario World Co-op";
@@ -476,7 +519,7 @@ index 4ebfe5f..5d934c8 100644
  #else
        gi.name = "Super Mario World";
  #endif
-@@ -1419,9 +1574,15 @@ int main(int argc, char** argv) {
+@@ -1419,9 +1600,15 @@ int main(int argc, char** argv) {
        gi.adaptive_view_supported = 0;
  #if SNESRECOMP_ENABLE_MODS
        gi.mods = mods_ready ? snes_mod_runtime_launcher_provider_c() : NULL;
@@ -493,7 +536,7 @@ index 4ebfe5f..5d934c8 100644
  #else
  #ifdef SMW_COOP_BUILD
        gi.widescreen_supported = 0;
-@@ -1444,12 +1605,43 @@ int main(int argc, char** argv) {
+@@ -1444,12 +1631,43 @@ int main(int argc, char** argv) {
        gi.netplay = SmwNetplayLauncherCallbacks();
  #endif
  
@@ -537,7 +580,7 @@ index 4ebfe5f..5d934c8 100644
  #else
        int act = recomp_launcher_run_window("Super Mario World \xE2\x80\x94 Launcher",
  #endif
-@@ -1469,6 +1661,21 @@ int main(int argc, char** argv) {
+@@ -1469,6 +1687,21 @@ int main(int argc, char** argv) {
  #endif
        host_report_breadcrumb("launcher: action=%d rom=%s", act,
                               rom_path_buf[0] ? rom_path_buf : "(none)");
@@ -559,7 +602,7 @@ index 4ebfe5f..5d934c8 100644
        if (act == 1) {
  #if defined(RECOMP_LAUNCHER) && defined(SMW_COOP_BUILD)
          snprintf(g_config.netplay_player_name,
-@@ -1692,7 +1899,7 @@ int main(int argc, char** argv) {
+@@ -1692,7 +1925,7 @@ int main(int argc, char** argv) {
    }
    const char *spawn = getenv("SMW_ENEMY_SPAWN");
    if (spawn && *spawn) g_smw_video.adaptive_spawns = strcmp(spawn, "original") != 0;
@@ -568,7 +611,7 @@ index 4ebfe5f..5d934c8 100644
    g_smw_video.enabled = false;
  #endif
    g_ws_active = false;
-@@ -1701,7 +1908,10 @@ int main(int argc, char** argv) {
+@@ -1701,7 +1934,10 @@ int main(int argc, char** argv) {
        SnesDisplayAspect_Clamp(g_config.display_aspect));
    g_snes_width = g_smw_viewport.width;
    extern void SmwRendererInstallHooks(void);
@@ -579,7 +622,7 @@ index 4ebfe5f..5d934c8 100644
    if (!SmwCoopInstallHooks()) {
      fprintf(stderr, "Unable to install native co-op guest hooks.\n");
      return 1;
-@@ -1927,8 +2137,11 @@ error_reading:;
+@@ -1927,8 +2163,11 @@ error_reading:;
      if (g_audio_device == 0) {
        host_report_breadcrumb("audio device open FAILED: %s", SDL_GetError());
        printf("Failed to open audio device: %s\n", SDL_GetError());
@@ -593,7 +636,7 @@ index 4ebfe5f..5d934c8 100644
      g_audio_channels = 2;
      /* One native DSP block is 534 samples at the SPC's true output rate
       * of 32040 Hz (1.024 MHz / 32). The old divisor of 32000 understated
-@@ -1950,6 +2163,7 @@ error_reading:;
+@@ -1950,6 +2189,7 @@ error_reading:;
          have.samples,
  #endif
          g_frames_per_block);
@@ -601,7 +644,7 @@ index 4ebfe5f..5d934c8 100644
    } else {
      host_report_breadcrumb("audio disabled in config");
    }
-@@ -2076,7 +2290,37 @@ error_reading:;
+@@ -2076,7 +2316,37 @@ error_reading:;
       * whole crash-capture pipeline (minidump + report + crash copy). */
      host_report_crash_test_tick();
  
@@ -639,7 +682,7 @@ index 4ebfe5f..5d934c8 100644
        switch (event.type) {
        case SDL_CONTROLLERDEVICEADDED:
          OpenOneGamepad(SNESRECOMP_SDL_EVENT_DEVICE(event));
-@@ -2098,6 +2342,11 @@ error_reading:;
+@@ -2098,6 +2368,11 @@ error_reading:;
        case SDL_CONTROLLERBUTTONDOWN:
        case SDL_CONTROLLERBUTTONUP: {
          gi = GetGamepadInfo(SNESRECOMP_SDL_EVENT_BUTTON_DEVICE(event));
@@ -651,7 +694,7 @@ index 4ebfe5f..5d934c8 100644
          if (gi) {
            int b = RemapSdlButton(SNESRECOMP_SDL_EVENT_BUTTON(event));
            if (b >= 0)
-@@ -2127,11 +2376,20 @@ error_reading:;
+@@ -2127,11 +2402,20 @@ error_reading:;
            running = false;
            break;
          }
@@ -674,7 +717,7 @@ index 4ebfe5f..5d934c8 100644
          HandleInput(SNESRECOMP_SDL_EVENT_KEY(event),
                      SNESRECOMP_SDL_EVENT_MOD(event), false);
          break;
-@@ -2159,11 +2417,25 @@ error_reading:;
+@@ -2159,11 +2443,25 @@ error_reading:;
        SDL_Delay(16);
        continue;
      }
@@ -703,7 +746,7 @@ index 4ebfe5f..5d934c8 100644
  
      // Clear gamepad inputs when joypad directional inputs to avoid wonkiness
      if (g_input_state & 0xf0)
-@@ -2323,6 +2595,11 @@ error_reading:;
+@@ -2323,6 +2621,11 @@ error_reading:;
      g_snes->disableRender = g_turbo && (frameCtr & 0xf) != 0;
  
      if (!g_snes->disableRender) {
@@ -715,7 +758,7 @@ index 4ebfe5f..5d934c8 100644
        DrawPpuFrameWithPerf();
      } else {
        /* Turbo (render skipped): SmwDrawPpuFrame / draw_ppu_frame is NOT purely
-@@ -3186,6 +3463,11 @@ static const char kDefaultConfigIniContent[] =
+@@ -3186,6 +3489,11 @@ static const char kDefaultConfigIniContent[] =
    "\n"
    "# Remove the sprite limits per scan line\n"
    "NoSpriteLimits = 1\n"
@@ -727,8 +770,59 @@ index 4ebfe5f..5d934c8 100644
    "\n"
    "[Sound]\n"
    "EnableAudio = 1\n"
+@@ -3241,3 +3549,50 @@ static void EnsureConfigIni(void) {
+   fclose(f);
+   printf("[config.ini] Generated default config next to the executable\n");
+ }
++
++#ifdef SMW_SRW1_BUILD
++/* ---- Options side panel host hooks (SRW1 only) ---------------------------
++ * Each setter applies live and persists exactly one config.ini key; nothing
++ * here touches input mapping or [GamepadMap]. */
++static void Srw1SaveKey(const char *section, const char *key, int v) {
++  char buf[16];
++  snprintf(buf, sizeof(buf), "%d", v);
++  WriteConfigKey(g_srw1_config_file ? *g_srw1_config_file : NULL, section, key, buf);
++}
++int Srw1Host_GetFullscreen(void) { return (g_win_flags & SDL_WINDOW_FULLSCREEN) != 0; }
++void Srw1Host_SetFullscreen(int on) {
++  if (Srw1Host_GetFullscreen() != (on != 0)) HandleCommand(kKeys_Fullscreen, true);
++  g_config.fullscreen = on ? 1 : 0;
++  Srw1SaveKey("Graphics", "Fullscreen", g_config.fullscreen);
++}
++int Srw1Host_GetWindowScale(void) { return g_current_window_scale; }
++void Srw1Host_SetWindowScale(int scale) {
++  if (scale < 1) scale = 1;
++  if (scale > kMaxWindowScale) scale = kMaxWindowScale;
++  if (scale != g_current_window_scale) {
++    if (Srw1Host_GetFullscreen()) g_current_window_scale = (uint8)scale;
++    else ChangeWindowScale(scale - g_current_window_scale);
++  }
++  g_config.window_scale = g_current_window_scale;
++  Srw1SaveKey("Graphics", "WindowScale", g_config.window_scale);
++}
++int Srw1Host_GetLinear(void) { return g_config.linear_filtering != 0; }
++void Srw1Host_SetLinear(int on) {
++  g_config.linear_filtering = on != 0;
++  if (g_texture) snesrecomp_sdl_set_texture_linear(g_texture, g_config.linear_filtering != 0);
++  Srw1SaveKey("Graphics", "LinearFiltering", on ? 1 : 0);
++}
++int Srw1Host_GetStretch(void) { return g_config.ignore_aspect_ratio != 0; }
++void Srw1Host_SetStretch(int on) {
++  g_config.ignore_aspect_ratio = on != 0;
++  Srw1SaveKey("Graphics", "IgnoreAspectRatio", on ? 1 : 0);
++}
++int Srw1Host_GetSkipLauncher(void) { return g_config.skip_launcher != 0; }
++void Srw1Host_SetSkipLauncher(int on) {
++  g_config.skip_launcher = on != 0;
++  Srw1SaveKey("General", "SkipLauncher", on ? 1 : 0);
++}
++void Srw1Host_SaveState(int slot) { HandleCommand(kKeys_Save + slot, true); }
++void Srw1Host_LoadState(int slot) { HandleCommand(kKeys_Load + slot, true); }
++void Srw1Host_Reset(void) { HandleCommand(kKeys_Reset, true); }
++#endif
 diff --git a/src/opengl.c b/src/opengl.c
-index 68135ae..94c706a 100644
+index 68135ae..b495d5f 100644
 --- a/src/opengl.c
 +++ b/src/opengl.c
 @@ -16,7 +16,208 @@ static size_t g_screen_buffer_size;
@@ -965,7 +1059,15 @@ index 68135ae..94c706a 100644
    
    return true;
  }
-@@ -190,6 +404,13 @@ static void OpenGLRenderer_EndDraw(void) {
+@@ -179,6 +393,7 @@ static void OpenGLRenderer_EndDraw(void) {
+     viewport_height = drawable_height;
+   }
+ 
++  glActiveTexture(GL_TEXTURE0); /* shader passes may leave another unit active */
+   glBindTexture(GL_TEXTURE_2D, g_texture.gl_texture);
+   if (g_draw_width == g_texture.width && g_draw_height == g_texture.height) {
+     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, g_draw_width, g_draw_height, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, g_screen_buffer);
+@@ -190,6 +405,13 @@ static void OpenGLRenderer_EndDraw(void) {
  
    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
    glClear(GL_COLOR_BUFFER_BIT);
@@ -979,12 +1081,20 @@ index 68135ae..94c706a 100644
  
    if (g_glsl_shader == NULL) {
      glViewport(viewport_x, viewport_y, viewport_width, viewport_height);
-@@ -200,8 +421,16 @@ static void OpenGLRenderer_EndDraw(void) {
+@@ -200,8 +422,70 @@ static void OpenGLRenderer_EndDraw(void) {
      glBindVertexArray(g_VAO);
      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
    } else {
 -    GlslShader_Render(g_glsl_shader, &g_texture, viewport_x, viewport_y, viewport_width, viewport_height);
 -  }
++#ifdef SMW_SRW1_BUILD
++    { /* Presets enable/disable attributes on the bound VAO; give them their
++       * own so switching back to Off never draws through a disabled g_VAO. */
++      static GLuint shader_vao;
++      if (!shader_vao) glGenVertexArrays(1, &shader_vao);
++      glBindVertexArray(shader_vao);
++    }
++#endif
 +    GlslShader_Render(g_glsl_shader, &g_texture, viewport_x, viewport_y, viewport_width, viewport_height);
 +#ifdef SMW_SRW1_BUILD
 +    Srw1DrawSideArt(drawable_width, drawable_height, viewport_x, viewport_y,
@@ -992,6 +1102,52 @@ index 68135ae..94c706a 100644
 +#endif
 +  }
 +#ifdef SMW_SRW1_BUILD
++  {
++    /* Options side panel, drawn at window resolution over the final frame. */
++    static GLuint layer_tex;
++    const uint32_t *argb;
++    int lx, ly, lw, lh;
++    if (Srw1Options_Layer(drawable_width, drawable_height, viewport_x, viewport_y,
++                          viewport_width, viewport_height, &argb, &lx, &ly, &lw, &lh)) {
++      static GLuint layer_vao, layer_vbo;
++      if (!layer_tex) {
++        static const float kQuad[] = {
++          -1.0f,  1.0f, 0.0f, 0.0f, 0.0f,
++          -1.0f, -1.0f, 0.0f, 0.0f, 1.0f,
++           1.0f,  1.0f, 0.0f, 1.0f, 0.0f,
++           1.0f, -1.0f, 0.0f, 1.0f, 1.0f,
++        };
++        glGenTextures(1, &layer_tex);
++        glGenVertexArrays(1, &layer_vao);
++        glGenBuffers(1, &layer_vbo);
++        glBindVertexArray(layer_vao);
++        glBindBuffer(GL_ARRAY_BUFFER, layer_vbo);
++        glBufferData(GL_ARRAY_BUFFER, sizeof(kQuad), kQuad, GL_STATIC_DRAW);
++        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
++        glEnableVertexAttribArray(0);
++        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(3 * sizeof(float)));
++        glEnableVertexAttribArray(1);
++      }
++      glActiveTexture(GL_TEXTURE0);
++      glBindTexture(GL_TEXTURE_2D, layer_tex);
++      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, lw, lh, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, argb);
++      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++      glBindFramebuffer(GL_FRAMEBUFFER, 0);
++      glViewport(lx, drawable_height - ly - lh, lw, lh);
++      glEnable(GL_BLEND);
++      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++      glUseProgram(g_program);
++      glUniform1i(glGetUniformLocation(g_program, "texture1"), 0);
++      glBindVertexArray(layer_vao);
++      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
++      glDisable(GL_BLEND);
++      glBindVertexArray(g_VAO);
++      glBindTexture(GL_TEXTURE_2D, g_texture.gl_texture);
++    }
++  }
 +  g_gl_present_count++;
 +  Srw1MaybeGlShot(drawable_width, drawable_height);
 +#endif

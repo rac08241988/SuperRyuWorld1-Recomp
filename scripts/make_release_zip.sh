@@ -92,6 +92,7 @@ PY
 cp "$ROOT/scripts/release/README.txt" "$WORK/README.txt"
 cmp -s "$ROOT/LICENSE" "$WORK/LICENSE" || cp "$ROOT/LICENSE" "$WORK/LICENSE"
 cp "$ROOT/NOTICE.md" "$WORK/NOTICE.md"
+mkdir -p "$WORK/licenses" && cp "$ROOT"/overlay/licenses/* "$WORK/licenses/"
 cp "$ROOT/uninstall.bat" "$WORK/uninstall.bat"
 {
   echo "SuperRyuWorld1-Recomp $(git -C "$ROOT" rev-parse HEAD)"

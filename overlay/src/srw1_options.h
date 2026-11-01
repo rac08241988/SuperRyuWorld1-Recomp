@@ -36,4 +36,9 @@ bool OpenGLRenderer_IsActive(void);
 #ifdef __cplusplus
 }
 #endif
+/* The side panel as a window-resolution ARGB layer, or false when closed.
+ * The renderer blends argb (w*h, top-down) at (x, y) in drawable pixels. */
+bool Srw1Options_Layer(int out_w, int out_h, int vp_x, int vp_y, int vp_w, int vp_h,
+                       const uint32_t **argb, int *x, int *y, int *w, int *h);
+
 #endif

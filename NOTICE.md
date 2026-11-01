@@ -16,5 +16,9 @@ Not included here and governed by their own terms:
   (LGPL-3.0+, see its license files).
 - libretro/glsl-shaders, fetched at setup by `scripts/fetch_shaders.sh`
   (commit cba01a48). Each shader file carries its own license header.
+- The Inter typeface (Rasmus Andersson), embedded in `overlay/src/inter_font_data.h`
+  for the Options panel, under the SIL Open Font License 1.1
+  (`overlay/licenses/Inter-OFL.txt`). Glyphs are rasterized with stb_truetype
+  (public domain / MIT, from recomp-ui).
 - Super Ryu World (Aguni_) and Super Mario World (Nintendo). No ROM, patch, or
   data derived from either is distributed in this repository.
