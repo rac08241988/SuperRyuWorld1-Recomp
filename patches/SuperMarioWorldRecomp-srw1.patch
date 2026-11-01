@@ -155,8 +155,80 @@ index a6f5aab..9576196 100644
 +        SNES_GAME_VERSION="srw1-recomp-1"
 +    )
 +endif()
+diff --git a/src/config.c b/src/config.c
+index 9a8201e..5038002 100644
+--- a/src/config.c
++++ b/src/config.c
+@@ -429,6 +429,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
+       return ParseBool(value, &g_config.disable_frame_delay);
+     } else if (StringEqualsNoCase(key, "SkipLauncher")) {
+       return ParseBool(value, &g_config.skip_launcher);
++    } else if (StringEqualsNoCase(key, "BackgroundInput")) {
++      return ParseBool(value, &g_config.background_input);
+     } else if (StringEqualsNoCase(key, "NetplayPlayerName")) {
+       snprintf(g_config.netplay_player_name,
+                sizeof(g_config.netplay_player_name), "%s", value);
+@@ -640,6 +642,8 @@ static int CfgLineIsKey(const char *line, const char *key) {
+   return *r == '=';
+ }
+ 
++static void CfgWriteKvs(const char *filename, CfgKV *kvs, int N);
++
+ void WriteConfigFile(const char *filename) {
+   if (filename == NULL)
+     filename = "config.ini";
+@@ -659,6 +663,7 @@ void WriteConfigFile(const char *filename) {
+     { "GamepadMap", "Deadzone" },
+     { "GamepadMap", "DeadzoneP2" },
+     { "GamepadMap", "KeyboardPlayers" },
++    { "General",    "BackgroundInput" },
+   };
+   const int N = (int)countof(kvs);
+   snprintf(kvs[0].val, sizeof(kvs[0].val), "%d", g_config.window_scale ? g_config.window_scale : 3);
+@@ -677,7 +682,22 @@ void WriteConfigFile(const char *filename) {
+   snprintf(kvs[12].val, sizeof(kvs[12].val), "%d", g_config.deadzone[1]);
+   g_config.keyboard_players = (int8)(g_config.has_keyboard_controls & 3);
+   snprintf(kvs[13].val, sizeof(kvs[13].val), "%u", g_config.has_keyboard_controls & 3);
++  snprintf(kvs[14].val, sizeof(kvs[14].val), "%d", g_config.background_input ? 1 : 0);
++
++  CfgWriteKvs(filename, kvs, N);
++}
++
++/* Persist only [General] BackgroundInput (the in-game menu toggle), leaving
++ * every other line of config.ini ([GamepadMap] included) as it was. */
++void WriteConfigBackgroundInput(const char *filename) {
++  if (filename == NULL)
++    filename = "config.ini";
++  CfgKV kvs[] = { { "General", "BackgroundInput" } };
++  snprintf(kvs[0].val, sizeof(kvs[0].val), "%d", g_config.background_input ? 1 : 0);
++  CfgWriteKvs(filename, kvs, 1);
++}
+ 
++static void CfgWriteKvs(const char *filename, CfgKV *kvs, int N) {
+   /* Read the existing file (may be absent on a fresh extract). */
+   char *data = NULL;
+   long sz = 0;
+diff --git a/src/config.h b/src/config.h
+index 2b6c8e5..963eeb6 100644
+--- a/src/config.h
++++ b/src/config.h
+@@ -75,6 +75,7 @@ typedef struct Config {
+   // Set from the launcher's dashboard checkbox. Force the launcher back with the
+   // --launcher argument or by setting SkipLauncher = 0 in config.ini.
+   bool skip_launcher;
++  bool background_input;  /* [General] BackgroundInput: pad works while unfocused */
+ 
+   // Persistent lobby identity. Empty on first boot so recomp-ui asks the
+   // player to choose a display name before exposing host/join actions.
+@@ -130,5 +131,6 @@ void ConfigReloadKeyMap(const char *filename);
+ // with a surgical, comment-preserving in-place update. Called after the GUI
+ // launcher returns PLAY so the chosen settings survive the next boot.
+ void WriteConfigFile(const char *filename);
++void WriteConfigBackgroundInput(const char *filename);
+ int FindCmdForSdlKey(SDL_Keycode code, SDL_Keymod mod);
+ int FindCmdForGamepadButton(int button, uint32 modifiers);
 diff --git a/src/main.c b/src/main.c
-index 4ebfe5f..cdfd769 100644
+index 4ebfe5f..5d934c8 100644
 --- a/src/main.c
 +++ b/src/main.c
 @@ -61,7 +61,14 @@
@@ -184,7 +256,23 @@ index 4ebfe5f..cdfd769 100644
  #else
  static const char kWindowTitle[] = "Super Mario World (Recompiled)";
  #endif
-@@ -576,11 +585,87 @@ static void DrawPpuFrameWithPerf(void) {
+@@ -225,6 +234,15 @@ static SDL_mutex *g_benchmark_phase_mutex;
+ #endif
+ 
+ static GamepadInfo g_gamepad[2];
++#ifdef SMW_SRW1_BUILD
++static const char **g_srw1_config_file;
++bool Srw1_GetBackgroundInput(void) { return g_config.background_input; }
++void Srw1_SetBackgroundInput(bool enabled) {
++  if (g_config.background_input == enabled) return;
++  g_config.background_input = enabled;
++  WriteConfigBackgroundInput(g_srw1_config_file ? *g_srw1_config_file : NULL);
++}
++#endif
+ #ifdef SMW_COOP_BUILD
+ static SnesNetplayConfig g_netplay_cfg;
+ static int g_netplay_pending;
+@@ -576,11 +594,87 @@ static void DrawPpuFrameWithPerf(void) {
    const uint32 dump_frame = snes_frame_counter ? snes_frame_counter - 1 : 0;
    FrameDump_Present(dump_frame, pixel_buffer, pitch, g_snes_width, g_snes_height);
    FrameDump_Ppu(dump_frame, g_ppu);
@@ -273,7 +361,7 @@ index 4ebfe5f..cdfd769 100644
  static uint8 *g_audiobuffer, *g_audiobuffer_cur, *g_audiobuffer_end;
  static int g_frames_per_block;
  static uint8 g_audio_channels;
-@@ -1064,7 +1149,47 @@ static int BuildCoopOutputLeaf(const char *stock_path,
+@@ -1064,7 +1158,47 @@ static int BuildCoopOutputLeaf(const char *stock_path,
  }
  #endif
  
@@ -321,7 +409,7 @@ index 4ebfe5f..cdfd769 100644
  #ifndef _WIN32
    /* On Windows, do NOT install a SIGSEGV handler: the MSVC CRT's signal
     * shim intercepts access violations BEFORE the SetUnhandledExceptionFilter
-@@ -1163,7 +1288,13 @@ int main(int argc, char** argv) {
+@@ -1163,7 +1297,13 @@ int main(int argc, char** argv) {
    rom_argv[1] = NULL;
    argv = rom_argv;
    argc = args.rom ? 1 : 0;
@@ -335,7 +423,17 @@ index 4ebfe5f..cdfd769 100644
    /* The ROM path is already absolutized by the engine parser. */
  
    /* The config is config.ini next to the executable â€” nothing else,
-@@ -1209,6 +1340,10 @@ int main(int argc, char** argv) {
+@@ -1189,6 +1329,9 @@ int main(int argc, char** argv) {
+    * above + OFN_NOCHANGEDIR on the file dialogs). EnsureConfigIni already created
+    * it next to the exe; this keeps a stray chdir from relocating later writes. */
+   static char config_exe_path[1024];
++#ifdef SMW_SRW1_BUILD
++  g_srw1_config_file = &config_file;
++#endif
+   if (!config_file &&
+       snesrecomp_exe_dir_path("config.ini", config_exe_path, sizeof(config_exe_path)))
+     config_file = config_exe_path;
+@@ -1209,6 +1352,10 @@ int main(int argc, char** argv) {
      g_config.disable_frame_delay = !g_benchmark_audio_paced;
      g_config.skip_launcher = true;
      g_config.fullscreen = 0;
@@ -346,7 +444,7 @@ index 4ebfe5f..cdfd769 100644
      g_config.output_method = kOutputMethod_SDL;
    }
  #ifdef SMW_COOP_BUILD
-@@ -1236,7 +1371,13 @@ int main(int argc, char** argv) {
+@@ -1236,7 +1383,13 @@ int main(int argc, char** argv) {
     * skips a 512-byte SMC copier header automatically before hashing,
     * so headered and unheadered dumps both verify against this value. */
    static char rom_path_buf[1024];
@@ -360,7 +458,7 @@ index 4ebfe5f..cdfd769 100644
    int rom_resolved_by_launcher = 0;
  
  #ifdef SMW_COOP_BUILD
-@@ -1296,7 +1437,7 @@ int main(int argc, char** argv) {
+@@ -1296,7 +1449,7 @@ int main(int argc, char** argv) {
     * legal — so the Mods page renders empty with no error anywhere. That is
     * what shipped in v0.14.0. */
    int mods_ready = 0;
@@ -369,7 +467,7 @@ index 4ebfe5f..cdfd769 100644
    mods_ready = snes_mod_runtime_initialize_c(
        SNES_MOD_CATALOG_ROOT, "super-mario-world-us",
        "0838e531fe22c077528febe14cb3ff7c492f1f5fa8de354192bdff7137c27f5b");
-@@ -1406,6 +1547,8 @@ int main(int argc, char** argv) {
+@@ -1406,6 +1559,8 @@ int main(int argc, char** argv) {
  #endif
  #ifdef SMW_COOP_BUILD
        gi.name = "Super Mario World Co-op";
@@ -378,7 +476,7 @@ index 4ebfe5f..cdfd769 100644
  #else
        gi.name = "Super Mario World";
  #endif
-@@ -1419,9 +1562,13 @@ int main(int argc, char** argv) {
+@@ -1419,9 +1574,15 @@ int main(int argc, char** argv) {
        gi.adaptive_view_supported = 0;
  #if SNESRECOMP_ENABLE_MODS
        gi.mods = mods_ready ? snes_mod_runtime_launcher_provider_c() : NULL;
@@ -389,11 +487,13 @@ index 4ebfe5f..cdfd769 100644
 +#ifdef SMW_SRW1_BUILD
 +      /* Shader presets are chosen only from the in-game options menu (F12). */
 +      gi.has_shader = 0;
++      /* Run-ahead is not offered for SRW1: hidden in the launcher, forced 0. */
++      gi.has_run_ahead = 0;
 +#endif
  #else
  #ifdef SMW_COOP_BUILD
        gi.widescreen_supported = 0;
-@@ -1444,12 +1591,43 @@ int main(int argc, char** argv) {
+@@ -1444,12 +1605,43 @@ int main(int argc, char** argv) {
        gi.netplay = SmwNetplayLauncherCallbacks();
  #endif
  
@@ -437,7 +537,7 @@ index 4ebfe5f..cdfd769 100644
  #else
        int act = recomp_launcher_run_window("Super Mario World \xE2\x80\x94 Launcher",
  #endif
-@@ -1469,6 +1647,21 @@ int main(int argc, char** argv) {
+@@ -1469,6 +1661,21 @@ int main(int argc, char** argv) {
  #endif
        host_report_breadcrumb("launcher: action=%d rom=%s", act,
                               rom_path_buf[0] ? rom_path_buf : "(none)");
@@ -459,7 +559,7 @@ index 4ebfe5f..cdfd769 100644
        if (act == 1) {
  #if defined(RECOMP_LAUNCHER) && defined(SMW_COOP_BUILD)
          snprintf(g_config.netplay_player_name,
-@@ -1692,7 +1885,7 @@ int main(int argc, char** argv) {
+@@ -1692,7 +1899,7 @@ int main(int argc, char** argv) {
    }
    const char *spawn = getenv("SMW_ENEMY_SPAWN");
    if (spawn && *spawn) g_smw_video.adaptive_spawns = strcmp(spawn, "original") != 0;
@@ -468,7 +568,7 @@ index 4ebfe5f..cdfd769 100644
    g_smw_video.enabled = false;
  #endif
    g_ws_active = false;
-@@ -1701,7 +1894,10 @@ int main(int argc, char** argv) {
+@@ -1701,7 +1908,10 @@ int main(int argc, char** argv) {
        SnesDisplayAspect_Clamp(g_config.display_aspect));
    g_snes_width = g_smw_viewport.width;
    extern void SmwRendererInstallHooks(void);
@@ -479,7 +579,7 @@ index 4ebfe5f..cdfd769 100644
    if (!SmwCoopInstallHooks()) {
      fprintf(stderr, "Unable to install native co-op guest hooks.\n");
      return 1;
-@@ -1927,8 +2123,11 @@ error_reading:;
+@@ -1927,8 +2137,11 @@ error_reading:;
      if (g_audio_device == 0) {
        host_report_breadcrumb("audio device open FAILED: %s", SDL_GetError());
        printf("Failed to open audio device: %s\n", SDL_GetError());
@@ -493,7 +593,7 @@ index 4ebfe5f..cdfd769 100644
      g_audio_channels = 2;
      /* One native DSP block is 534 samples at the SPC's true output rate
       * of 32040 Hz (1.024 MHz / 32). The old divisor of 32000 understated
-@@ -1950,6 +2149,7 @@ error_reading:;
+@@ -1950,6 +2163,7 @@ error_reading:;
          have.samples,
  #endif
          g_frames_per_block);
@@ -501,7 +601,45 @@ index 4ebfe5f..cdfd769 100644
    } else {
      host_report_breadcrumb("audio disabled in config");
    }
-@@ -2098,6 +2298,11 @@ error_reading:;
+@@ -2076,7 +2290,37 @@ error_reading:;
+      * whole crash-capture pipeline (minidump + report + crash copy). */
+     host_report_crash_test_tick();
+ 
++#ifdef SMW_SRW1_BUILD
++    /* [General] BackgroundInput off (default): while the window is
++     * unfocused, controller presses and stick motion are dropped and
++     * everything held is released once when focus goes. Releases always
++     * pass. The button mapping itself is untouched. */
++    const bool pad_blocked = !g_config.background_input && g_window &&
++        !(SDL_GetWindowFlags(g_window) & SDL_WINDOW_INPUT_FOCUS);
++    {
++      static bool was_blocked;
++      if (pad_blocked && !was_blocked) {
++        for (int gp = 0; gp < (int)countof(g_gamepad); gp++) {
++          GamepadInfo *gpi = &g_gamepad[gp];
++          for (int b = 0; b < kGamepadBtn_Count; b++)
++            if (gpi->modifiers & (1u << b))
++              HandleGamepadInput(gpi, b, false);
++          HandleGamepadAxisInput(gpi, SDL_CONTROLLER_AXIS_LEFTX, 0);
++          HandleGamepadAxisInput(gpi, SDL_CONTROLLER_AXIS_LEFTY, 0);
++          HandleGamepadAxisInput(gpi, SDL_CONTROLLER_AXIS_TRIGGERLEFT, 0);
++          HandleGamepadAxisInput(gpi, SDL_CONTROLLER_AXIS_TRIGGERRIGHT, 0);
++        }
++      }
++      was_blocked = pad_blocked;
++    }
++#else
++    const bool pad_blocked = false;
++#endif
+     while (SDL_PollEvent(&event)) {
++      if (pad_blocked &&
++          (event.type == SDL_CONTROLLERBUTTONDOWN || event.type == SDL_CONTROLLERAXISMOTION ||
++           event.type == SDL_JOYBUTTONDOWN || event.type == SDL_JOYAXISMOTION))
++        continue;
+       switch (event.type) {
+       case SDL_CONTROLLERDEVICEADDED:
+         OpenOneGamepad(SNESRECOMP_SDL_EVENT_DEVICE(event));
+@@ -2098,6 +2342,11 @@ error_reading:;
        case SDL_CONTROLLERBUTTONDOWN:
        case SDL_CONTROLLERBUTTONUP: {
          gi = GetGamepadInfo(SNESRECOMP_SDL_EVENT_BUTTON_DEVICE(event));
@@ -513,7 +651,7 @@ index 4ebfe5f..cdfd769 100644
          if (gi) {
            int b = RemapSdlButton(SNESRECOMP_SDL_EVENT_BUTTON(event));
            if (b >= 0)
-@@ -2127,11 +2332,20 @@ error_reading:;
+@@ -2127,11 +2376,20 @@ error_reading:;
            running = false;
            break;
          }
@@ -536,7 +674,7 @@ index 4ebfe5f..cdfd769 100644
          HandleInput(SNESRECOMP_SDL_EVENT_KEY(event),
                      SNESRECOMP_SDL_EVENT_MOD(event), false);
          break;
-@@ -2159,11 +2373,25 @@ error_reading:;
+@@ -2159,11 +2417,25 @@ error_reading:;
        SDL_Delay(16);
        continue;
      }
@@ -565,7 +703,7 @@ index 4ebfe5f..cdfd769 100644
  
      // Clear gamepad inputs when joypad directional inputs to avoid wonkiness
      if (g_input_state & 0xf0)
-@@ -2323,6 +2551,11 @@ error_reading:;
+@@ -2323,6 +2595,11 @@ error_reading:;
      g_snes->disableRender = g_turbo && (frameCtr & 0xf) != 0;
  
      if (!g_snes->disableRender) {
@@ -577,7 +715,7 @@ index 4ebfe5f..cdfd769 100644
        DrawPpuFrameWithPerf();
      } else {
        /* Turbo (render skipped): SmwDrawPpuFrame / draw_ppu_frame is NOT purely
-@@ -3186,6 +3419,11 @@ static const char kDefaultConfigIniContent[] =
+@@ -3186,6 +3463,11 @@ static const char kDefaultConfigIniContent[] =
    "\n"
    "# Remove the sprite limits per scan line\n"
    "NoSpriteLimits = 1\n"

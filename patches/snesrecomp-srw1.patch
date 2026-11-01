@@ -1,8 +1,16 @@
 diff --git a/host/snesrecomp_codegen_host.c b/host/snesrecomp_codegen_host.c
-index 13040e4..cebbb76 100644
+index 13040e4..848601d 100644
 --- a/host/snesrecomp_codegen_host.c
 +++ b/host/snesrecomp_codegen_host.c
-@@ -496,6 +496,14 @@ static int collect_cache_bases(char bases[][1400], int max_n) {
+@@ -15,6 +15,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <time.h>
+ 
+ #if defined(_WIN32)
+ #  include <windows.h>
+@@ -496,6 +497,14 @@ static int collect_cache_bases(char bases[][1400], int max_n) {
      const char* cache = getenv("RETCOMM_TOOLCHAIN_CACHE");
      if (cache && cache[0] && n < max_n)
          snprintf(bases[n++], 1400, "%s", cache);
@@ -17,7 +25,7 @@ index 13040e4..cebbb76 100644
      const char* data = getenv("RETCOMM_DATA_HOME");
      if (data && data[0] && n < max_n &&
          join_path(bases[n], 1400, data, "toolchains/" SNESRECOMP_TC_PACK))
-@@ -972,19 +980,59 @@ static void handle_progress_line(const char* line,
+@@ -972,19 +981,59 @@ static void handle_progress_line(const char* line,
      }
  }
  
@@ -79,7 +87,7 @@ index 13040e4..cebbb76 100644
  
      if (g_has_funcs_h) {
          snprintf(cmdline, sizeof(cmdline),
-@@ -1022,7 +1070,7 @@ static int run_generate_win(const char* rom,
+@@ -1022,7 +1071,7 @@ static int run_generate_win(const char* rom,
      si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
      si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
  
@@ -88,7 +96,7 @@ index 13040e4..cebbb76 100644
      snprintf(mutable_cmd, sizeof(mutable_cmd), "%s", cmdline);
      if (!CreateProcessA(NULL, mutable_cmd, NULL, NULL, TRUE, 0, NULL,
                          g_project_root, &si, &pi)) {
-@@ -1112,6 +1160,11 @@ static int run_generate_posix(const char* rom,
+@@ -1112,6 +1161,11 @@ static int run_generate_posix(const char* rom,
          argv[argc++] = "--expected-sha256";
          argv[argc++] = (char*)g_cfg->expected_sha256;
      }
@@ -100,7 +108,248 @@ index 13040e4..cebbb76 100644
      argv[argc++] = "--json-progress";
      argv[argc] = NULL;
  
-@@ -1198,6 +1251,26 @@ static int host_prepare_generate(const char* source_path, char* out_path,
+@@ -1165,6 +1219,232 @@ static int run_generate_posix(const char* rom,
+ }
+ #endif
+ 
++/* ---- save import (SRW1 v1.1.0) ------------------------------------
++ * A new release usually lands in a new folder next to the old one (a fresh
++ * unzip, or Quiver's Apps/<name>/ beside a manual install). Before the first
++ * build, copy the battery save (saves/save.srm), the save-state slots
++ * (saves/save*.sav) and the settings (build/*.ini) from the most recent
++ * earlier install among the sibling folders. Rules:
++ *   - default on; a file named `no-save-import` beside the setup exe, or
++ *     SNESRECOMP_NO_SAVE_IMPORT=1, turns it off;
++ *   - runs once per install (marker build/saves/.imported);
++ *   - anything already in build/saves is first copied to
++ *     build/save-backups/<YYYYmmdd-HHMMSS>/;
++ *   - a file is never replaced by an older one; settings are only copied
++ *     when this install has none yet. */
++typedef struct { char path[1400]; long long mtime; } ImpFile;
++
++static long long file_mtime(const char* p) {
++#if defined(_WIN32)
++    WIN32_FILE_ATTRIBUTE_DATA a;
++    if (!GetFileAttributesExA(p, GetFileExInfoStandard, &a)) return -1;
++    return ((long long)a.ftLastWriteTime.dwHighDateTime << 32) | a.ftLastWriteTime.dwLowDateTime;
++#else
++    struct stat st;
++    if (stat(p, &st) != 0) return -1;
++    return (long long)st.st_mtime * 10000000LL;
++#endif
++}
++
++static int copy_file_keep_time(const char* src, const char* dst) {
++#if defined(_WIN32)
++    return CopyFileA(src, dst, FALSE) ? 1 : 0;
++#else
++    FILE* in = fopen(src, "rb");
++    if (!in) return 0;
++    FILE* out = fopen(dst, "wb");
++    if (!out) { fclose(in); return 0; }
++    char buf[65536];
++    size_t n;
++    int ok = 1;
++    while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
++        if (fwrite(buf, 1, n, out) != n) { ok = 0; break; }
++    fclose(in);
++    if (fclose(out) != 0) ok = 0;
++    return ok;
++#endif
++}
++
++/* List plain files in dir whose names match: ext list like ".srm|.sav|.ini" */
++static int list_files(const char* dir, const char* exts, char names[][260], int max) {
++    int n = 0;
++#if defined(_WIN32)
++    char pat[1500];
++    snprintf(pat, sizeof(pat), "%s\\*", dir);
++    WIN32_FIND_DATAA fd;
++    HANDLE h = FindFirstFileA(pat, &fd);
++    if (h == INVALID_HANDLE_VALUE) return 0;
++    do {
++        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
++        const char* nm = fd.cFileName;
++#else
++    DIR* d = opendir(dir);
++    if (!d) return 0;
++    struct dirent* e;
++    while ((e = readdir(d))) {
++        const char* nm = e->d_name;
++        char full[1500];
++        snprintf(full, sizeof(full), "%s/%s", dir, nm);
++        if (!path_is_file(full)) continue;
++#endif
++        const char* dot = strrchr(nm, '.');
++        if (dot && n < max) {
++            char want[16];
++            snprintf(want, sizeof(want), "%s|", dot);
++            char hay[64];
++            snprintf(hay, sizeof(hay), "%s|", exts);
++            for (char* c = want; *c; c++) *c = (char)tolower((unsigned char)*c);
++            if (strstr(hay, want) && strcmp(nm, "resume.sav") != 0)
++                snprintf(names[n++], 260, "%s", nm);
++        }
++#if defined(_WIN32)
++    } while (FindNextFileA(h, &fd));
++    FindClose(h);
++#else
++    }
++    closedir(d);
++#endif
++    return n;
++}
++
++static void import_log(const char* fmt, const char* a, const char* b) {
++    char line[1600];
++    snprintf(line, sizeof(line), fmt, a ? a : "", b ? b : "");
++    fprintf(stderr, "[setup] save import: %s\n", line);
++    if (g_build_dir[0]) {
++        char p[1300];
++        if (join_path(p, sizeof(p), g_build_dir, "save-import.log")) {
++            FILE* f = fopen(p, "a");
++            if (f) { fprintf(f, "%s\n", line); fclose(f); }
++        }
++    }
++}
++
++static void import_previous_saves(void) {
++    static int done;
++    if (done) return;
++    done = 1;
++    const char* off = getenv("SNESRECOMP_NO_SAVE_IMPORT");
++    if (off && off[0] && off[0] != '0') return;
++    char p[1400], q[1400];
++    if (!g_build_dir[0] || !g_project_root[0]) return;
++    if (join_path(p, sizeof(p), g_project_root, "no-save-import") && path_is_file(p)) return;
++    char my_saves[1400], marker[1400];
++    if (!join_path(my_saves, sizeof(my_saves), g_build_dir, "saves")) return;
++    if (!join_path(marker, sizeof(marker), my_saves, ".imported")) return;
++    if (path_is_file(marker)) return;
++
++    /* Candidates: <parent of the install>/<sibling>/build/saves */
++    char parent[1100];
++    if (!dirname_copy(parent, sizeof(parent), g_project_root)) return;
++    char sibs[64][260];
++    int ns = 0;
++#if defined(_WIN32)
++    {
++        char pat[1200];
++        snprintf(pat, sizeof(pat), "%s\\*", parent);
++        WIN32_FIND_DATAA fd;
++        HANDLE h = FindFirstFileA(pat, &fd);
++        if (h != INVALID_HANDLE_VALUE) {
++            do {
++                if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && fd.cFileName[0] != '.' && ns < 64)
++                    snprintf(sibs[ns++], 260, "%s", fd.cFileName);
++            } while (FindNextFileA(h, &fd));
++            FindClose(h);
++        }
++    }
++#else
++    {
++        DIR* d = opendir(parent);
++        struct dirent* e;
++        while (d && (e = readdir(d)))
++            if (e->d_name[0] != '.' && ns < 64) snprintf(sibs[ns++], 260, "%s", e->d_name);
++        if (d) closedir(d);
++    }
++#endif
++    /* g_exe_path = <build>/<game exe>: its file name is the game's. */
++    const char* exe = strrchr(g_exe_path, '/');
++    const char* exe2 = strrchr(g_exe_path, '\\');
++    if (!exe || (exe2 && exe2 > exe)) exe = exe2;
++    exe = exe ? exe + 1 : g_exe_path;
++    char best[1400] = "";
++    long long best_t = -1;
++    for (int i = 0; i < ns; i++) {
++        char root[1400], b[1400], s[1400], gexe[1400];
++        if (!join_path(root, sizeof(root), parent, sibs[i])) continue;
++        if (strcmp(root, g_project_root) == 0) continue;
++        if (!join_path(b, sizeof(b), root, "build") || !join_path(s, sizeof(s), b, "saves")) continue;
++        if (!path_is_dir(s)) continue;
++        /* Same game: the old build holds an exe with our name, or the
++         * uninstaller left the saves behind (KEPT_SAVES.txt). */
++        char kept[1400];
++        if (exe && exe[0] && join_path(gexe, sizeof(gexe), b, exe) && !path_is_file(gexe) &&
++            !(join_path(kept, sizeof(kept), b, "KEPT_SAVES.txt") && path_is_file(kept)))
++            continue;
++        char names[64][260];
++        int n = list_files(s, ".srm|.sav", names, 64);
++        long long t = -1;
++        for (int k = 0; k < n; k++) {
++            char f[1700];
++            snprintf(f, sizeof(f), "%s/%s", s, names[k]);
++            long long m = file_mtime(f);
++            if (m > t) t = m;
++        }
++        if (n > 0 && t > best_t) { best_t = t; snprintf(best, sizeof(best), "%s", b); }
++    }
++    mkdir_p(my_saves);
++    if (!best[0]) {
++        FILE* f = fopen(marker, "w");
++        if (f) { fputs("no earlier install found\n", f); fclose(f); }
++        return;
++    }
++    import_log("importing from %s%s", best, "");
++
++    /* Backup whatever this install already has. */
++    char names[64][260];
++    int have = list_files(my_saves, ".srm|.sav", names, 64);
++    if (have > 0) {
++        char stamp[32];
++#if defined(_WIN32)
++        SYSTEMTIME st;
++        GetLocalTime(&st);
++        snprintf(stamp, sizeof(stamp), "%04d%02d%02d-%02d%02d%02d", st.wYear, st.wMonth, st.wDay,
++                 st.wHour, st.wMinute, st.wSecond);
++#else
++        snprintf(stamp, sizeof(stamp), "%ld", (long)time(NULL));
++#endif
++        char bdir[1400];
++        snprintf(bdir, sizeof(bdir), "%s/save-backups/%s", g_build_dir, stamp);
++        mkdir_p(bdir);
++        for (int k = 0; k < have; k++) {
++            snprintf(p, sizeof(p), "%s/%s", my_saves, names[k]);
++            snprintf(q, sizeof(q), "%s/%s", bdir, names[k]);
++            copy_file_keep_time(p, q);
++        }
++        import_log("backed up %s existing save files to %s", "this install's", bdir);
++    }
++
++    char src_saves[1400];
++    join_path(src_saves, sizeof(src_saves), best, "saves");
++    int n = list_files(src_saves, ".srm|.sav", names, 64);
++    for (int k = 0; k < n; k++) {
++        snprintf(p, sizeof(p), "%s/%s", src_saves, names[k]);
++        snprintf(q, sizeof(q), "%s/%s", my_saves, names[k]);
++        long long ts = file_mtime(p), td = file_mtime(q);
++        if (td >= 0 && td >= ts) { import_log("kept %s (this install's copy is newer)%s", names[k], ""); continue; }
++        if (copy_file_keep_time(p, q)) import_log("copied %s%s", names[k], "");
++    }
++    n = list_files(best, ".ini", names, 64);
++    for (int k = 0; k < n; k++) {
++        snprintf(p, sizeof(p), "%s/%s", best, names[k]);
++        snprintf(q, sizeof(q), "%s/%s", g_build_dir, names[k]);
++        if (path_is_file(q)) continue;
++        if (copy_file_keep_time(p, q)) import_log("copied settings %s%s", names[k], "");
++    }
++    FILE* f = fopen(marker, "w");
++    if (f) { fprintf(f, "imported from %s\n", best); fclose(f); }
++}
++
+ static int host_prepare_generate(const char* source_path, char* out_path,
+                                  size_t out_cap, char* err_msg, size_t err_cap,
+                                  RecompLauncherCPrepareProgressFn on_progress,
+@@ -1184,6 +1464,7 @@ static int host_prepare_generate(const char* source_path, char* out_path,
+             return 0;
+         }
+     }
++    import_previous_saves();
+     step_log_open("snesrecomp generate");
+     if (on_progress)
+         on_progress(progress_ctx, 0.02f, "Starting snesrecomp generate…");
+@@ -1198,6 +1479,26 @@ static int host_prepare_generate(const char* source_path, char* out_path,
          return 0;
  #endif
  
@@ -127,7 +376,7 @@ index 13040e4..cebbb76 100644
      snprintf(out_path, out_cap, "%s", source_path);
      if (on_progress)
          on_progress(progress_ctx, 1.0f, "Generate complete");
-@@ -1272,13 +1345,16 @@ static int write_windows_deferred_rebuild_helper(char* err_msg, size_t err_cap)
+@@ -1272,13 +1573,16 @@ static int write_windows_deferred_rebuild_helper(char* err_msg, size_t err_cap)
              "  )\r\n"
              ")\r\n"
              "echo Building...\r\n"
@@ -149,7 +398,15 @@ index 13040e4..cebbb76 100644
              "  echo.\r\n"
              "  echo Build failed. Fix the errors above, then rebuild manually.\r\n"
              "  pause\r\n"
-@@ -1802,7 +1878,7 @@ void snesrecomp_codegen_host_apply(RecompLauncherCGameInfo* gi,
+@@ -1449,6 +1753,7 @@ static int host_rebuild_game(const char* rom_path, char* out_exe_path,
+         snprintf(err_msg, err_cap, "Project tree is not available.");
+         return 0;
+     }
++    import_previous_saves();
+     /* The wizard's toolchain page normally ran first; this is the fallback
+      * for a skipped page or a cache pruned since -- fetch rather than fail. */
+     char why[256];
+@@ -1802,7 +2107,7 @@ void snesrecomp_codegen_host_apply(RecompLauncherCGameInfo* gi,
  
      gi->prepare_with_progress = host_prepare_generate;
      gi->prepare_use_selected_rom = 1;

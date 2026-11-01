@@ -35,6 +35,36 @@ ROM hack into a native Linux / Windows executable. It is a small SRW1 layer on t
 > This project is not affiliated with, endorsed by, or sponsored by Nintendo.
 > Super Mario World is a trademark of Nintendo.
 
+## Where your saves are
+
+Everything lives inside the unzipped folder, under `build\`:
+
+| File | What it is |
+|---|---|
+| `build\saves\save.srm` | The in-game (battery) save |
+| `build\saves\*.sav` | Save-state slots (Shift+F1…F10 save, F1…F10 load) |
+| `build\config.ini`, `build\keybinds.ini` | Settings and key bindings |
+| `build\srw1_options.ini` | Options-menu choices (shader, 120 Hz motion, side art) |
+| `build\save-backups\<date>\` | Backups made before saves were imported |
+
+**Save import (on by default):** when a new release is unzipped next to an
+older install, the first setup run copies that install's `build\saves` and
+settings into the new one. Anything already in the new `build\saves` is backed
+up to `build\save-backups\` first, a save is never replaced by an older copy,
+and settings are copied only when the new install has none. Put an empty file
+named `no-save-import` beside the exe to turn it off; the log is
+`build\save-import.log`.
+
+**Uninstall:** run `uninstall.bat`. It asks **Delete save files? (Y/N)** —
+*No* removes everything except `build\saves`, `build\save-backups` and the
+`.ini` settings, so a later install can import them.
+
+**Background input** (options menu, default **Off**, saved as
+`BackgroundInput` in `[General]` of `config.ini`): when off, the controller is
+ignored while the window is not focused. Button mapping is unchanged.
+
+---
+
 ## Credits
 
 - **Super Ryu World** is by **Aguni_** —

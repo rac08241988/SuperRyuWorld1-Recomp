@@ -27,6 +27,9 @@ void Srw1Options_OnPresent(uint8_t *pixels, int pitch, int width, int height);
 void Srw1Options_RedrawPaused(uint8_t *pixels, int pitch, int width, int height);
 /* Applies a pending (debounced) shader change; call once per loop. */
 void Srw1Options_Tick(void);
+/* Implemented by main.c: [General] BackgroundInput in config.ini. */
+bool Srw1_GetBackgroundInput(void);
+void Srw1_SetBackgroundInput(bool enabled);
 /* Implemented by opengl.c under SMW_SRW1_BUILD. */
 bool OpenGLRenderer_SetShader(const char *path);
 bool OpenGLRenderer_IsActive(void);

@@ -92,6 +92,7 @@ PY
 cp "$ROOT/scripts/release/README.txt" "$WORK/README.txt"
 cmp -s "$ROOT/LICENSE" "$WORK/LICENSE" || cp "$ROOT/LICENSE" "$WORK/LICENSE"
 cp "$ROOT/NOTICE.md" "$WORK/NOTICE.md"
+cp "$ROOT/uninstall.bat" "$WORK/uninstall.bat"
 {
   echo "SuperRyuWorld1-Recomp $(git -C "$ROOT" rev-parse HEAD)"
   echo "SuperMarioWorldRecomp $(git -C "$UP" rev-parse HEAD) + patches/SuperMarioWorldRecomp-srw1.patch"

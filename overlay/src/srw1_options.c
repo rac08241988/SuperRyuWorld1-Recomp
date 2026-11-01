@@ -143,7 +143,7 @@ static int load_choice(void) {
 
 static const RecompRuntimeUiItem *g_items;
 
-enum { kItemShader, kItemMotion, kItemSideArt, kItemResume, kItemCount };
+enum { kItemShader, kItemMotion, kItemSideArt, kItemBgInput, kItemResume, kItemCount };
 
 
 static int ui_get(void *ctx, const RecompRuntimeUiItem *item, int *out) {
@@ -158,6 +158,10 @@ static int ui_get(void *ctx, const RecompRuntimeUiItem *item, int *out) {
   }
   if (item == &g_items[kItemSideArt]) {
     *out = g_side_art ? 1 : 0;
+    return 1;
+  }
+  if (item == &g_items[kItemBgInput]) {
+    *out = Srw1_GetBackgroundInput() ? 1 : 0;
     return 1;
   }
   return 0;
@@ -179,6 +183,13 @@ static int ui_set(void *ctx, const RecompRuntimeUiItem *item, int value) {
     Srw1Interp_SetSideArt(g_side_art);
     save_choice();
     snprintf(g_status, sizeof(g_status), "Side art: %s", kOnOffLabels[value]);
+    recomp_runtime_ui_set_status(g_ui, g_status);
+    return 1;
+  }
+  if (item == &g_items[kItemBgInput]) {
+    if (value < 0 || value > 1) return 0;
+    Srw1_SetBackgroundInput(value != 0);
+    snprintf(g_status, sizeof(g_status), "Background input: %s", kOnOffLabels[value]);
     recomp_runtime_ui_set_status(g_ui, g_status);
     return 1;
   }
@@ -258,6 +269,17 @@ void Srw1Options_Init(void) {
   items[kItemSideArt].step = 1;
   items[kItemSideArt].choices = kOnOffLabels;
   items[kItemSideArt].choice_count = 2;
+  items[kItemBgInput].key = "controls.background_input";
+  items[kItemBgInput].section = "Video";
+  items[kItemBgInput].label = "Background input";
+  items[kItemBgInput].description =
+      "Controller works while the window is unfocused.";
+  items[kItemBgInput].type = RECOMP_RUNTIME_UI_CHOICE;
+  items[kItemBgInput].minimum = 0;
+  items[kItemBgInput].maximum = 1;
+  items[kItemBgInput].step = 1;
+  items[kItemBgInput].choices = kOnOffLabels;
+  items[kItemBgInput].choice_count = 2;
   items[kItemResume].key = RECOMP_RUNTIME_UI_KEY_RESUME;
   items[kItemResume].section = "Video";
   items[kItemResume].label = "Resume";
