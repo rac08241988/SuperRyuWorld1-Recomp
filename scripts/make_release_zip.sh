@@ -22,7 +22,7 @@ set -euo pipefail
 trap 'echo "make_release_zip: failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UP="$ROOT/SuperMarioWorldRecomp"
-VERSION="${1:-1.1.0}"
+VERSION="${1:-1.1.1}"
 EXE=SuperRyuWorld1SNESRecomp
 NAME="SuperRyuWorld1-SNESRecomp-windows-x64-v${VERSION}"
 BUILD="${BUILD_DIR:-$ROOT/.build/setup-win64}"

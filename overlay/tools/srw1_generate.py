@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 EXPECT_SHA256 = "d7c20cdf42e66a9b81d49359affd4e3548de5855444faceccfac8a1c845bf57f"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -120,8 +121,34 @@ def main(argv):
     except Exception as e:  # noqa: BLE001
         print("srw1_generate: cfg merge failed: %s" % e, file=sys.stderr)
         return 1
+    # The SDK hashes the file byte-for-byte, but the expected digest is the
+    # headerless image (as rom_identity / the launcher picker use). A .smc with
+    # a 512-byte copier header would always fail with exit 3, so hand the SDK
+    # a header-stripped temporary copy. Truly wrong ROMs still fail the hash.
+    rom_path = os.path.abspath(a.rom)
+    with tempfile.TemporaryDirectory(prefix="srw1-rom-") as tmp:
+        try:
+            if os.path.getsize(rom_path) % 1024 == 512:
+                with open(rom_path, "rb") as f:
+                    data = f.read()
+                rom_path = os.path.join(tmp, "srw1-headerless.sfc")
+                with open(rom_path, "wb") as f:
+                    f.write(data[512:])
+                del data
+        except OSError as e:
+            print("srw1_generate: cannot read ROM: %s" % e, file=sys.stderr)
+            return 3
+        rc = run_sdk(a, cfg_out, rom_path)
+    if rc != 0:
+        return rc
+    dst = ROOT / "recomp/srw1/funcs.h"
+    shutil.copyfile(cfg_out / "funcs.h", dst)
+    return 0
+
+
+def run_sdk(a, cfg_out, rom_path):
     cmd = [sys.executable, str(ROOT / "snesrecomp/snesrecomp_cli.py"), "generate",
-           "--rom", os.path.abspath(a.rom),
+           "--rom", rom_path,
            "--cfg-dir", str(cfg_out),
            "--out-dir", str(ROOT / "src/gen-srw1"),
            "--funcs-h", str(cfg_out / "funcs.h"),
@@ -132,12 +159,7 @@ def main(argv):
     if a.json_progress:
         cmd.append("--json-progress")
     sys.stdout.flush()
-    rc = subprocess.call(cmd, cwd=str(ROOT))
-    if rc != 0:
-        return rc
-    dst = ROOT / "recomp/srw1/funcs.h"
-    shutil.copyfile(cfg_out / "funcs.h", dst)
-    return 0
+    return subprocess.call(cmd, cwd=str(ROOT))
 
 
 if __name__ == "__main__":

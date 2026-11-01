@@ -2,7 +2,7 @@
 
 ## How to play (Windows)
 
-1. Download `SuperRyuWorld1-SNESRecomp-windows-x64-v1.1.0.zip` from
+1. Download `SuperRyuWorld1-SNESRecomp-windows-x64-v1.1.1.zip` from
    [Releases](https://github.com/rac08241988/SuperRyuWorld1-Recomp/releases/latest)
 2. Unzip it
 3. Open `SuperRyuWorld1SNESRecomp.exe`
@@ -20,6 +20,15 @@ In game: **Esc** or **F12** (gamepad: **Guide**) opens/closes the Options
 panel, **Alt+Enter** toggles fullscreen.
 
 ![Gameplay](docs/screenshots/gameplay.png)
+
+## What's new in v1.1.1
+
+- **Fix: "ROM verification failed (wrong dump)" with `.smc` ROMs.** A Super
+  Ryu World 1 ROM that carries a 512-byte copier header (most `.smc` files)
+  showed OK in the picker but was then refused by **Generate & rebuild...**,
+  because the generator hashed the file including the header. The header is
+  now stripped before the check, so headered and headerless dumps of the
+  correct ROM both work; other ROMs are still refused.
 
 ## What's new in v1.1.0
 
