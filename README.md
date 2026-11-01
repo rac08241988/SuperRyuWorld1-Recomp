@@ -7,7 +7,7 @@
 2. Unzip it
 3. Open `SuperRyuWorld1SNESRecomp.exe`
 4. Click **Browse ROM** and pick your own Super Ryu World 1 ROM (patched SMW — see
-   [ROMs you need](#roms-you-need-bring-your-own))
+   [How to patch the SNES ROM](#how-to-patch-the-snes-rom-step-by-step))
 5. Click **Generate & rebuild...**, wait a few minutes, then play
 
 The first launch downloads a portable compiler (roughly 800 MB once unpacked) into `toolchain\`
@@ -20,6 +20,13 @@ In game: **Esc** or **F12** (gamepad: **Guide**) opens/closes the Options
 panel, **Alt+Enter** toggles fullscreen.
 
 ![Gameplay](docs/screenshots/gameplay.png)
+
+## What's new in v1.1.2
+
+- **Docs only:** new [How to patch the SNES ROM](#how-to-patch-the-snes-rom-step-by-step)
+  section with step-by-step Floating IPS and Rom Patcher JS instructions,
+  clean-ROM hashes, and headered vs headerless ROMs. The game files are
+  unchanged; the download is still the v1.1.1 zip.
 
 ## What's new in v1.1.1
 
@@ -148,6 +155,74 @@ ignored while the window is not focused. Button mapping is unchanged.
 | `scripts/setup.sh` | Submodules → patches → overlay → shaders → (optional) ROM check + C generation |
 | `scripts/fetch_shaders.sh`, `scripts/stage_shaders.py` | Fetch libretro/glsl-shaders @ `cba01a48` and stage the 88 root presets |
 | `cmake/mingw-w64.cmake` | Toolchain file for Windows x64 cross-builds from Linux |
+
+## How to patch the SNES ROM (step by step)
+
+The port never ships a ROM or a patch. You make the Super Ryu World 1 ROM yourself from
+your own Super Mario World cartridge dump and the hack's official patch.
+
+### What you need
+
+1. **A clean Super Mario World (USA) ROM** (your own dump). The known-good
+   headerless file is 524,288 bytes (512 KiB) with:
+   - CRC32 `B19ED489`
+   - SHA-1 `6B47BB75D16514B6A476AA0C73A683A2A4C18765`
+   - SHA-256 `0838E531FE22C077528FEBE14CB3FF7C492F1F5FA8DE354192BDFF7137C27F5B`
+
+   (No-Intro "Super Mario World (USA)", as listed by
+   [superfamicom.org](https://superfamicom.org/info/super-mario-world) and
+   [TASVideos](https://tasvideos.org/Games/99/Versions/View/3712).)
+2. **The hack's patch** from its SMW Central page:
+   <https://www.smwcentral.net/?a=details&id=18268> (Super Ryu World by Aguni_).
+   Download the zip and unpack it; the patch is the `.bps` file inside.
+3. **A patcher**: [Floating IPS (Flips)](https://github.com/Sir-Walrus/Flips/releases)
+   on Windows, or the browser-based [Rom Patcher JS](https://www.marcrobledo.com/RomPatcher.js/).
+
+### Headered vs headerless ROMs
+
+Some dumps (usually `.smc` files) start with an extra 512-byte "copier
+header". Headerless: 524,288 bytes. Headered: 524,800 bytes. The hashes
+above are for the **headerless** file. BPS patches check the input ROM,
+so if the patcher says the ROM is wrong, it is most likely headered.
+Remove the header first: Rom Patcher JS can do it for you (enable its
+header-removal option before applying), or use a header tool such as
+SMW Central's or Lunar Magic's. The port itself accepts the patched ROM
+with or without a header (it strips the 512 bytes before checking the hash).
+
+### Patch with Floating IPS (Windows)
+
+1. Download `flips-windows.zip` from the [Flips releases page](https://github.com/Sir-Walrus/Flips/releases) and unzip it anywhere.
+2. Run `flips.exe`.
+3. Click **Apply Patch**.
+4. Pick the hack's `.bps` file.
+5. Pick your clean, headerless Super Mario World (USA) ROM.
+6. Choose where to save the result and give it a name, for example
+   `Super Ryu World 1.sfc` (keep the `.sfc` or `.smc` extension).
+7. Flips reports success. If it says the input ROM is wrong, check the
+   ROM against the hashes above and remove a copier header if there is one.
+
+Command-line alternative: `flips --apply patch.bps smw.sfc "Super Ryu World 1.sfc"`.
+
+### Patch online with Rom Patcher JS
+
+1. Open <https://www.marcrobledo.com/RomPatcher.js/>.
+2. **ROM file**: choose your clean Super Mario World (USA) ROM.
+3. **Patch file**: choose the hack's `.bps`.
+4. Click **Apply patch**; your browser downloads the patched ROM.
+   Everything runs locally in your browser, nothing is uploaded.
+
+### Pick the patched ROM in the launcher
+
+1. Unzip the release and open `SuperRyuWorld1SNESRecomp.exe`.
+2. Click **Browse ROM** and choose the patched ROM you just made
+   (`.sfc` or `.smc`, headered or not). The launcher shows it as OK when
+   the hash matches (headerless SHA-256 `d7c20cdf42e66a9b81d49359affd4e3548de5855444faceccfac8a1c845bf57f`).
+3. Click **Generate & rebuild...** and wait a few minutes (the first run
+   downloads a portable compiler). The game starts when it is done; later
+   launches only need **Play**.
+
+If the launcher refuses the ROM, you have a different release of the hack
+or a modified ROM: re-patch from a clean SMW (USA) ROM with the patch above.
 
 ## ROMs you need (bring your own)
 
