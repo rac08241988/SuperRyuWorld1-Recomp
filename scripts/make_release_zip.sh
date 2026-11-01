@@ -22,7 +22,7 @@ set -euo pipefail
 trap 'echo "make_release_zip: failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UP="$ROOT/SuperMarioWorldRecomp"
-VERSION="${1:-1.0.0}"
+VERSION="${1:-1.1.0}"
 EXE=SuperRyuWorld1SNESRecomp
 NAME="SuperRyuWorld1-SNESRecomp-windows-x64-v${VERSION}"
 BUILD="${BUILD_DIR:-$ROOT/.build/setup-win64}"
@@ -118,5 +118,14 @@ grep -rlI -e '/workspace/' -e '/home/box' "$WORK" --include='*.c' --include='*.h
 STAMP="$(date -u -d "@$(( $(git -C "$ROOT" log -1 --format=%ct) - 172800 ))" +%Y%m%d%H%M.%S)"
 find "$WORK" -exec touch -h -t "$STAMP" {} +
 mkdir -p "$ROOT/dist"; rm -f "$OUT"
-( cd "$WORK" && zip -qr -X -y "$OUT" . )
+python3 - "$WORK" "$OUT" <<'PY'
+import os, sys, zipfile
+root, out = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+    for d, dirs, files in os.walk(root):
+        dirs.sort()
+        for f in sorted(files):
+            p = os.path.join(d, f)
+            z.write(p, os.path.relpath(p, root))
+PY
 echo "wrote $OUT ($(du -h "$OUT" | cut -f1))"

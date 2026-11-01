@@ -2,7 +2,7 @@
 
 ## How to play (Windows)
 
-1. Download `SuperRyuWorld1-SNESRecomp-windows-x64-v1.0.0.zip` from
+1. Download `SuperRyuWorld1-SNESRecomp-windows-x64-v1.1.0.zip` from
    [Releases](https://github.com/rac08241988/SuperRyuWorld1-Recomp/releases/latest)
 2. Unzip it
 3. Open `SuperRyuWorld1SNESRecomp.exe`
@@ -16,8 +16,45 @@ the generated sources, `build\`, saves, `config.ini`, `SuperRyuWorld1.log` —
 stays inside the unzipped folder. Later launches go straight to the game's
 launcher; press **Play**.
 
-In game: **Esc** or **F12** opens/closes the options menu (shader, 120 Hz
-motion, side art), **Alt+Enter** toggles fullscreen.
+In game: **Esc** or **F12** (gamepad: **Guide**) opens/closes the Options
+panel, **Alt+Enter** toggles fullscreen.
+
+![Gameplay](docs/screenshots/gameplay.png)
+
+## What's new in v1.1.0
+
+- **New Options panel**: a frosted side panel over the paused game (the game
+  stays visible), with **Video / Display / Controls / Shaders / System** tabs,
+  a description line, a bottom button-hint bar (keyboard keys, or Xbox /
+  PlayStation glyphs to match your controller) and an **Apply** button.
+  - **Video**: 120 Hz motion (Off / Interpolate / Low-latency), Side art,
+    Linear filter.
+  - **Display**: Fullscreen, Window scale (1–10x), Stretch to window.
+  - **Controls**: Background input (default **Off**).
+  - **Shaders**: all 88 presets in a scrolling list; the highlighted preset
+    **previews live** behind the panel and is kept only when you Apply (Back
+    reverts it). **Shaders only work on the OpenGL renderer**
+    (`OutputMethod = OpenGL` in `config.ini`, the default); with the SDL
+    renderer the list is shown but has no effect.
+  - **System**: Save state slot (1–10), Save state, Load state, Skip launcher
+    at startup, Resume, Quit (press twice).
+  - Changes are pending until **Apply** (the Apply button, **F5**, or **X /
+    Start** on a controller). Each setting is written to its own key in
+    `config.ini`; key and gamepad mappings are never touched.
+- **Controls**: in the panel, arrows / D-pad move, Enter/Space or A selects,
+  Backspace/Esc or B goes back, Q/E, Tab or LB/RB switch tabs. Gameplay
+  controls are exactly as in v1.0.0; the panel reads the controller only while
+  it is open.
+- **Background input** option (default Off, `BackgroundInput` in `[General]`).
+- **Run-ahead** is hidden in the launcher and menu and forced off.
+- **Save import** from an older install next to the new one (on by default,
+  with a backup; a newer save is never overwritten).
+- **`uninstall.bat`** asks *Delete save files? (Y/N)*.
+
+| | |
+|---|---|
+| ![Video tab](docs/screenshots/options-video.png) | ![Shader live preview](docs/screenshots/options-shader-preview.png) |
+| ![Display tab](docs/screenshots/options-display.png) | ![System tab, Xbox glyphs](docs/screenshots/options-system-xbox.png) |
 
 ---
 
@@ -44,7 +81,7 @@ Everything lives inside the unzipped folder, under `build\`:
 | `build\saves\save.srm` | The in-game (battery) save |
 | `build\saves\*.sav` | Save-state slots (Shift+F1…F10 save, F1…F10 load) |
 | `build\config.ini`, `build\keybinds.ini` | Settings and key bindings |
-| `build\srw1_options.ini` | Options-menu choices (shader, 120 Hz motion, side art) |
+| `build\srw1_options.ini` | Options-panel choices (shader, 120 Hz motion, side art) |
 | `build\save-backups\<date>\` | Backups made before saves were imported |
 
 **Save import (on by default):** when a new release is unzipped next to an
@@ -189,12 +226,14 @@ without a console window; output goes to `SuperRyuWorld1.log` beside it (pass
 
 - **Native recompiled build** of Super Ryu World 1 via snesrecomp, with
   SDL3 + OpenGL output.
-- **In-game options menu — Esc or F12** (gamepad: Guide) opens and closes it;
+- **In-game Options panel — Esc or F12** (gamepad: Guide) opens and closes it;
   it never quits the game. Arrows/D-pad navigate, Enter/A accept, Backspace/B
-  back. The game pauses while it is open.
+  back, Q/E or LB/RB switch tabs, F5 or X/Start apply. The game pauses while
+  it is open. See *What's new in v1.1.0* for every tab.
   - **Shader**: any of the 88 root-level RetroArch `.glslp` presets from
     libretro/glsl-shaders (CRT, scanlines, xBR/ScaleFX, NTSC, handheld, …),
-    multi-pass, switched live; Off by default. Needs the OpenGL output.
+    multi-pass, previewed live and kept on Apply; Off by default. Shaders only
+    work on the OpenGL renderer (`OutputMethod = OpenGL`).
   - **Motion** (120 Hz+ displays): **Off** (original 60 Hz path),
     **Interpolate** (in-between frames toward the newest tick, ≤1 tick delay),
     **Low-latency** (projects forward from the newest tick). Game logic stays at

@@ -306,7 +306,8 @@ static void build_rows(void) {
   row("system.skip_launcher", T_SYSTEM, "Skip launcher at startup",
       "Start straight into the game.", R_TOGGLE);
   row("system.resume", T_SYSTEM, "Resume", "Close this panel.", R_ACTION);
-  row("system.reset", T_SYSTEM, "Reset console", "Restart the game from power-on.", R_ACTION);
+  /* No "Reset console" row: the host soft reset (Ctrl+R) overflows the stack
+   * in this build, and the panel never offers what the game cannot do. */
   row("system.quit", T_SYSTEM, "Quit", "Close Super Ryu World 1.", R_ACTION);
 }
 

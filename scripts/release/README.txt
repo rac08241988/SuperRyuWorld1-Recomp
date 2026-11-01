@@ -23,7 +23,9 @@ Delete the folder to remove it completely.
 
 In game
 -------
-  Esc or F12      options menu (shaders, 120 Hz motion, side-bar art)
+  Esc or F12      Options panel (gamepad: Guide): video, display, controls,
+                  shaders (OpenGL renderer only), save states. Changes are
+                  kept on Apply (F5, or X/Start on a controller).
   Alt+Enter       fullscreen
   Controls        see config.ini (keyboard and gamepad)
   Log file        SuperRyuWorld1.log beside the game exe (or run it with
